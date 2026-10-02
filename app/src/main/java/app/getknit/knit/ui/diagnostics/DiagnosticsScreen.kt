@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +40,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -105,6 +107,7 @@ fun DiagnosticsScreen(
     val lastCrash by viewModel.lastCrash.collectAsStateWithLifecycle()
     val moderationLatched by viewModel.moderationLatched.collectAsStateWithLifecycle()
     val bleLinkCap by viewModel.bleLinkCap.collectAsStateWithLifecycle()
+    val nanOff by viewModel.nanOff.collectAsStateWithLifecycle()
     val blePhyMode by viewModel.blePhyMode.collectAsStateWithLifecycle()
     val blePhys by viewModel.blePhys.collectAsStateWithLifecycle()
     var confirmingModerationReset by remember { mutableStateOf(false) }
@@ -157,6 +160,9 @@ fun DiagnosticsScreen(
         bleLinkCapOffered = viewModel.bleLinkCapOffered,
         bleLinkCap = bleLinkCap,
         onSetBleLinkCap = viewModel::setBleLinkCap,
+        nanSwitchOffered = viewModel.nanSwitchOffered,
+        nanOff = nanOff,
+        onSetNanOff = viewModel::setNanOff,
         blePhyMode = blePhyMode,
         onSetBlePhyMode = viewModel::setBlePhyMode,
         blePhys = blePhys,
@@ -200,6 +206,10 @@ internal fun DiagnosticsScreenContent(
     bleLinkCapOffered: Boolean = false,
     bleLinkCap: Int? = null,
     onSetBleLinkCap: (Int) -> Unit = {},
+    // The debug-only Wi-Fi Aware switch, defaulted off for the same reason: [nanOff] true means the plane is stopped.
+    nanSwitchOffered: Boolean = false,
+    nanOff: Boolean = false,
+    onSetNanOff: (Boolean) -> Unit = {},
     // The Coded PHY experiment's mode; null (a build that keeps it dark, and every other caller) hides the row.
     blePhyMode: CodedPhyMode? = null,
     onSetBlePhyMode: (CodedPhyMode) -> Unit = {},
@@ -259,13 +269,16 @@ internal fun DiagnosticsScreenContent(
             }
 
             item { SectionHeader(stringResource(R.string.diagnostics_transports)) }
-            item { TransportsSection(state.transports) }
+            item { TransportsSection(state.transports, nanOff = nanSwitchOffered && nanOff) }
             // Under the rows it explains: the one plane that can put itself on hold says so with the way back.
             if (state.transports.any { it is TransportRow.Live && it.status.initiatorHeld }) {
                 item { InitiatorHoldSection(onRelease = onReleaseInitiatorHold) }
             }
             if (bleLinkCapOffered && state.transports.any { it is TransportRow.Live && it.kind == TransportKind.Bluetooth }) {
                 item { BleLinkCapRow(cap = bleLinkCap, onSet = onSetBleLinkCap) }
+            }
+            if (nanSwitchOffered && state.transports.any { it is TransportRow.Live && it.kind == TransportKind.WifiAware }) {
+                item { NanSwitchRow(off = nanOff, onSet = onSetNanOff) }
             }
             if (blePhyMode != null && state.transports.any { it is TransportRow.Live && it.kind == TransportKind.Bluetooth }) {
                 item { BlePhyModeRow(mode = blePhyMode, onSet = onSetBlePhyMode) }
@@ -581,7 +594,11 @@ private fun MetricRow(
 }
 
 @Composable
-private fun TransportsSection(rows: List<TransportRow>) {
+private fun TransportsSection(
+    rows: List<TransportRow>,
+    // The debug Wi-Fi Aware switch is off: that row says so rather than reading as a radio that is merely down.
+    nanOff: Boolean = false,
+) {
     if (rows.isEmpty()) {
         EmptyLine(stringResource(R.string.diagnostics_none_transports))
         return
@@ -589,7 +606,7 @@ private fun TransportsSection(rows: List<TransportRow>) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         rows.forEach { row ->
             when (row) {
-                is TransportRow.Live -> LiveTransportRow(row)
+                is TransportRow.Live -> LiveTransportRow(row, switchedOff = nanOff && row.kind == TransportKind.WifiAware)
                 is TransportRow.Absent -> AbsentTransportRow(row)
             }
         }
@@ -597,7 +614,10 @@ private fun TransportsSection(rows: List<TransportRow>) {
 }
 
 @Composable
-private fun LiveTransportRow(row: TransportRow.Live) {
+private fun LiveTransportRow(
+    row: TransportRow.Live,
+    switchedOff: Boolean = false,
+) {
     val status = row.status
     Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -620,6 +640,11 @@ private fun LiveTransportRow(row: TransportRow.Live) {
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
         )
+        // Debug flag: the Wi-Fi Aware switch under this section has stopped the plane (its dot reads Unavailable).
+        if (switchedOff) {
+            TransportTag(stringResource(R.string.diagnostics_transport_debug_off))
+            Spacer(Modifier.width(8.dp))
+        }
         // Diagnostic flag: this radio reports itself contended (Bluetooth ↔ A2DP audio streaming).
         if (status.contended) {
             TransportTag(stringResource(R.string.diagnostics_transport_audio))
@@ -976,6 +1001,43 @@ private fun BleLinkCapRow(
         ) {
             Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.diagnostics_ble_link_cap_increase))
         }
+    }
+}
+
+/**
+ * The debug build's Wi-Fi Aware switch (`SettingsStore.debugNanOff`): on runs the plane, off stops it so the mesh
+ * runs on Bluetooth alone. The whole row toggles; the transport applies it without a restart and it persists.
+ */
+@Composable
+private fun NanSwitchRow(
+    off: Boolean,
+    onSet: (Boolean) -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .toggleable(value = !off, onValueChange = { on -> onSet(!on) }, role = Role.Switch)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .testTag("nan_switch"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.diagnostics_nan_switch_label),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium,
+            )
+            Text(
+                text = stringResource(R.string.diagnostics_nan_switch_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 2.dp),
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Switch(checked = !off, onCheckedChange = null)
     }
 }
 

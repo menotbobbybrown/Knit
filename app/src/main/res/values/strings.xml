@@ -790,6 +790,10 @@
     <string name="diagnostics_ble_link_cap_default">Default (%1$d)</string>
     <string name="diagnostics_ble_link_cap_decrease">Fewer Bluetooth links</string>
     <string name="diagnostics_ble_link_cap_increase">More Bluetooth links</string>
+    <!-- Debug builds only: the Wi-Fi Aware switch (SettingsStore.debugNanOff), and the tag its transport row wears while off. -->
+    <string name="diagnostics_nan_switch_label">Wi-Fi Aware (debug)</string>
+    <string name="diagnostics_nan_switch_body">Turn off to run the mesh on Bluetooth alone. Stays off after a restart until you turn it back on.</string>
+    <string name="diagnostics_transport_debug_off">off</string>
     <string name="diagnostics_ble_phy_label">Long-range Bluetooth (experiment)</string>
     <string name="diagnostics_ble_phy_body">Off is today\'s Bluetooth. Auto finds phones further away and slows a link down to keep it as they walk off. Coded and 1M hold every link on one speed, for comparing range.</string>
     <string name="diagnostics_ble_phy_off">Off</string>

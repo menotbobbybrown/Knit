@@ -196,6 +196,11 @@ import java.nio.ByteBuffer
  *   the reply is the stored `cap` (null = shipped budget) and the Bluetooth row's `linked` / `nearby`. The transport
  *   collects the key, so a lower cap sheds the weakest links once they are 20 s old and refuses new inbound dialers;
  *   the side channel still reaches unlinked peers. Persists across restarts until cleared.
+ * - [ACTION_NANOFF] — the **Wi-Fi Aware switch** Diagnostics offers in debug builds (`SettingsStore.debugNanOff`).
+ *   `--ez off true` stops the plane (links, responder and session go; the mesh runs on its other radios), `--ez off
+ *   false` starts it again, no extras reads. The reply is the stored `off` and the Wi-Fi Aware row's `health` /
+ *   `linked` / `nearby` (`present` false where the device has no Wi-Fi Aware plane). Applied live by the debug
+ *   build's `SwitchableTransport`; persists across restarts until switched back on.
  * - [ACTION_PHY] — the **BLE Coded PHY experiment** (ADR 2026-10.yvn6; `BuildConfig.BLE_CODED_PHY`, else an error).
  *   `--es mode off|auto|coded|1m` stores the mode (`SettingsStore.debugBlePhyMode`, applied live), `--es txpower
  *   high|medium` re-raises the Coded advert, and `--ei stepDown|stepUp|stepDownReads|minGapMs|stepUpHoldMs N`
@@ -408,6 +413,10 @@ class DebugBridgeReceiver :
 
                         ACTION_BLECAP -> {
                             handleBleCap(intent)
+                        }
+
+                        ACTION_NANOFF -> {
+                            handleNanOff(intent)
                         }
 
                         ACTION_PHY -> {
@@ -2062,6 +2071,21 @@ class DebugBridgeReceiver :
             .put("nearby", ble?.nearby ?: JSONObject.NULL)
     }
 
+    /** [ACTION_NANOFF]: switches the Wi-Fi Aware plane off or back on, then reports the switch with the plane's row. */
+    private suspend fun handleNanOff(intent: Intent): JSONObject {
+        if (intent.hasExtra("off")) settings.setDebugNanOff(intent.getBooleanExtra("off", false))
+        val off = settings.debugNanOff.first()
+        if (intent.hasExtra("off")) delay(NANOFF_SETTLE_MS) // the transport collects the key; let it land before reading the row
+        val nan = mesh.transportStatuses.value.firstOrNull { it.kind == TransportKind.WifiAware }
+        return JSONObject()
+            .put("status", "ok")
+            .put("off", off)
+            .put("present", nan != null)
+            .put("health", nan?.health?.name ?: JSONObject.NULL)
+            .put("linked", nan?.linked ?: JSONObject.NULL)
+            .put("nearby", nan?.nearby ?: JSONObject.NULL)
+    }
+
     /** [ACTION_PHY]: sets the Coded PHY experiment's mode, Coded advert power or step tuning, then reports it. */
     private suspend fun handlePhy(intent: Intent): JSONObject {
         if (!BuildConfig.BLE_CODED_PHY) return reply("error", "this build keeps the Coded PHY experiment dark (-PbleCodedPhy)")
@@ -2236,6 +2260,7 @@ class DebugBridgeReceiver :
         const val ACTION_NANINIT = "app.getknit.knit.debug.NANINIT"
         const val ACTION_NANMSG = "app.getknit.knit.debug.NANMSG"
         const val ACTION_BLECAP = "app.getknit.knit.debug.BLECAP"
+        const val ACTION_NANOFF = "app.getknit.knit.debug.NANOFF"
         const val ACTION_PHY = "app.getknit.knit.debug.PHY"
         const val ACTION_REQNOTIF = "app.getknit.knit.debug.REQNOTIF"
         const val ACTION_MSGNOTIF = "app.getknit.knit.debug.MSGNOTIF"
@@ -2297,6 +2322,9 @@ class DebugBridgeReceiver :
 
         // How long `…debug.PHY` waits after storing a mode before reading the status back: the transport collects it.
         const val PHY_SETTLE_MS = 300L
+
+        // How long `…debug.NANOFF` waits after a flip before reading the Wi-Fi Aware row back: the transport collects it.
+        const val NANOFF_SETTLE_MS = 300L
 
         // Mirror AttachmentStore.GIF_MAX_DIMENSION / GIF_MAX_FPS (private there) so this diagnostic
         // shrinks a GIF with the same bounds the real ingest path uses.

@@ -269,6 +269,15 @@ carries `-f 0x20` (`FLAG_INCLUDE_STOPPED_PACKAGES`); `scripts/bridge.sh` always 
   Bluetooth row's `linked` / `nearby`. It persists across restarts (a `debug_` key, never in a backup) until
   cleared. The transport sheds the weakest links once they are 20 s old and refuses a dialer that would add one
   (`bt refused client <id> (… atCap=true)`); the side channel still reaches unlinked peers, and NAN is untouched.
+- `…debug.NANOFF` — the **Wi-Fi Aware switch** (debug builds only; `SettingsStore.debugNanOff`, also a switch under
+  Diagnostics' Transports), for running the mesh on Bluetooth alone without touching the phone's Wi-Fi. `--ez off true`
+  stops the plane (its links, responder and session go, `neighbors`/`reachable` empty, the composite's file route
+  skips it), `--ez off false` starts it again, no extras reads. The reply carries `off`, `present` (false where the
+  device has no Wi-Fi Aware plane — the switch is still stored) and the Wi-Fi Aware row's `health` (`Unavailable`
+  while off) / `linked` / `nearby`. Applied live by the debug build's `mesh/SwitchableTransport`, which logs
+  `debug switch: WifiAware off → stopped` / `on → started` under `WifiAwareTransport` (and `is off — not starting`
+  on a mesh start while off). It persists across restarts (a `debug_` key, never in a backup) until switched back
+  on. While it is off, a NAN action that needs the live transport (`NANICM`, say) finds nothing bound.
 - `…debug.PHY` — the **BLE Coded PHY experiment** (ADR 2026-10.yvn6; builds with `BuildConfig.BLE_CODED_PHY`, else
   an error; also a segmented row under Diagnostics' Transports). `--es mode off|auto|coded|1m` stores the mode
   (applied live, persists — a `debug_` key), `--es txpower high|medium` re-raises the Coded advert, `--ei stepDown

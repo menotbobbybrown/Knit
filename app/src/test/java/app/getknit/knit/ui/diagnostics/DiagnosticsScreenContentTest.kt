@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
@@ -422,6 +424,78 @@ class DiagnosticsScreenContentTest {
         compose.onNodeWithTag("ble_link_cap_dec").assertIsNotEnabled()
         compose.onNodeWithTag("ble_link_cap_inc").performClick()
         assertEquals(listOf(1), sets)
+    }
+
+    private fun setNanSwitchContent(
+        offered: Boolean,
+        off: Boolean,
+        onSet: (Boolean) -> Unit = {},
+    ) {
+        compose.setContent {
+            KnitTheme {
+                DiagnosticsScreenContent(
+                    state =
+                        state().copy(
+                            transports =
+                                listOf(
+                                    TransportRow.Live(
+                                        TransportStatus(TransportKind.Bluetooth, TransportHealth.Healthy, linked = 1, nearby = 3),
+                                    ),
+                                    TransportRow.Live(
+                                        TransportStatus(
+                                            TransportKind.WifiAware,
+                                            if (off) TransportHealth.Unavailable else TransportHealth.Healthy,
+                                            linked = 0,
+                                            nearby = if (off) 0 else 2,
+                                        ),
+                                    ),
+                                ),
+                        ),
+                    health = TransportHealth.Healthy,
+                    lastCrash = null,
+                    now = 0L,
+                    snackbarHostState = SnackbarHostState(),
+                    onBack = {},
+                    onRestartMesh = {},
+                    onScan = {},
+                    onOpenCrashLog = {},
+                    moderationLatched = false,
+                    onResetModeration = {},
+                    nanSwitchOffered = offered,
+                    nanOff = off,
+                    onSetNanOff = onSet,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun theWifiAwareSwitchIsAbsentUnlessOffered() {
+        setNanSwitchContent(offered = false, off = true)
+        compose.onNodeWithTag("nan_switch").assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.diagnostics_transport_debug_off)).assertDoesNotExist()
+    }
+
+    @Test
+    fun theWifiAwareSwitchTurnsThePlaneOff() {
+        val sets = mutableListOf<Boolean>()
+        setNanSwitchContent(offered = true, off = false, onSet = { sets += it })
+
+        compose.onNodeWithText(context.getString(R.string.diagnostics_transport_debug_off)).assertDoesNotExist()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasTestTag("nan_switch"))
+        compose.onNodeWithTag("nan_switch").assertIsOn().performClick()
+        assertEquals(listOf(true), sets)
+    }
+
+    @Test
+    fun anOffWifiAwareSwitchTagsItsRowAndTurnsBackOn() {
+        val sets = mutableListOf<Boolean>()
+        setNanSwitchContent(offered = true, off = true, onSet = { sets += it })
+
+        compose.onNodeWithText(context.getString(R.string.diagnostics_transport_debug_off)).assertIsDisplayed()
+        compose.onNode(hasScrollAction()).performScrollToNode(hasTestTag("nan_switch"))
+        compose.onNodeWithTag("nan_switch").assertIsOff().performClick()
+        assertEquals(listOf(false), sets)
     }
 
     @Test

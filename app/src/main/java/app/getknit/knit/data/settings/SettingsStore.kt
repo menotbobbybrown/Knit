@@ -450,6 +450,15 @@ class SettingsStore(
         }
 
     /**
+     * Whether the debug build's Wi-Fi Aware plane is switched off, so the mesh runs on its other radios alone.
+     * Set from Diagnostics or the debug bridge's `NANOFF`; read live by the `SwitchableTransport` the debug
+     * build wraps the Wi-Fi Aware child in. Gated on `BuildConfig.DEBUG` here, so a release build reads false
+     * whatever is stored. Phone-local: the `debug_` prefix keeps it out of a backup.
+     */
+    val debugNanOff: Flow<Boolean> =
+        dataStore.data.map { prefs -> BuildConfig.DEBUG && prefs[KEY_DEBUG_NAN_OFF] == true }
+
+    /**
      * The BLE Coded PHY experiment's mode (ADR 2026-10.yvn6), or null where the build keeps it dark
      * (`BuildConfig.BLE_CODED_PHY` — not `DEBUG`, so a `-PbleCodedPhy=true` release-shaped build can be field tested).
      * Unset reads [CodedPhyMode.AUTO]: a build that carries the experiment runs it. Set from Diagnostics or
@@ -735,6 +744,16 @@ class SettingsStore(
             }
         }
 
+    /** Sets [debugNanOff]; on (false) clears the key. */
+    suspend fun setDebugNanOff(off: Boolean) =
+        dataStore.edit {
+            if (off) {
+                it[KEY_DEBUG_NAN_OFF] = true
+            } else {
+                it.remove(KEY_DEBUG_NAN_OFF)
+            }
+        }
+
     /** Sets [debugBlePhyMode]. */
     suspend fun setDebugBlePhyMode(mode: CodedPhyMode) = dataStore.edit { it[KEY_DEBUG_BLE_PHY_MODE] = mode.wire }
 
@@ -963,6 +982,7 @@ class SettingsStore(
         val KEY_LORA_CHANNEL = intPreferencesKey("lora_channel_index")
         val KEY_DEBUG_BLE_LINK_CAP = intPreferencesKey("debug_ble_link_cap")
         val KEY_DEBUG_BLE_PHY_MODE = stringPreferencesKey("debug_ble_phy_mode")
+        val KEY_DEBUG_NAN_OFF = booleanPreferencesKey("debug_nan_off")
         val KEY_LORA_NODE = longPreferencesKey("lora_board_node")
         val KEY_LORA_KEY = stringPreferencesKey("lora_board_key")
         val KEY_LORA_SETUP_ADDRESS = stringPreferencesKey("lora_setup_address")

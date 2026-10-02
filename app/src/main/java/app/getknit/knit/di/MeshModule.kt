@@ -26,6 +26,7 @@ import app.getknit.knit.mesh.MeshTransport
 import app.getknit.knit.mesh.ProfileFrameSource
 import app.getknit.knit.mesh.PublicChannelSink
 import app.getknit.knit.mesh.StoreDigest
+import app.getknit.knit.mesh.SwitchableTransport
 import app.getknit.knit.mesh.bluetooth.BleConnectArbiter
 import app.getknit.knit.mesh.bluetooth.BleSideChannel
 import app.getknit.knit.mesh.bluetooth.BluetoothMeshTransport
@@ -142,7 +143,16 @@ val meshModule =
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WifiAwareTransport.isSupported(ctx)) {
                             // SettingsStore is both journals (the attach give-up and the initiator hold, ADR 055 / 2026-09.m8kc).
                             val settings = get<SettingsStore>()
-                            add(WifiAwareTransport(ctx, get(), get(), get(), get(), get(), settings, settings))
+                            val nan = WifiAwareTransport(ctx, get(), get(), get(), get(), get(), settings, settings)
+                            // Debug builds can switch the plane off live (Diagnostics / the bridge's NANOFF); release
+                            // hands the composite the bare transport.
+                            add(
+                                if (BuildConfig.DEBUG) {
+                                    SwitchableTransport(nan, settings.debugNanOff, get()) { msg -> Log.d("WifiAwareTransport", msg) }
+                                } else {
+                                    nan
+                                },
+                            )
                         }
                         // The LoRa (Meshtastic) plane rides LAST — lowest send-preference, fast-plane only.
                         // Gated on the flag; the classes stay in the APK but are never resolved when off.

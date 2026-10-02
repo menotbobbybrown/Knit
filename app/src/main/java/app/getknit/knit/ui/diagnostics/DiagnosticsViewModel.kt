@@ -176,6 +176,22 @@ class DiagnosticsViewModel(
         viewModelScope.launch { settings.setDebugBleLinkCap(cap) }
     }
 
+    /** Whether this build offers the Wi-Fi Aware switch — debug builds only. */
+    val nanSwitchOffered: Boolean = BuildConfig.DEBUG
+
+    /**
+     * Whether the debug Wi-Fi Aware switch is off. Its own flow for the same reason as [bleLinkCap]; the transport's
+     * debug wrapper collects the same key, so a flip here stops or starts the plane without a restart.
+     */
+    val nanOff: StateFlow<Boolean> =
+        settings.debugNanOff.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), false)
+
+    /** Switches the Wi-Fi Aware plane off or back on. A no-op outside a debug build. */
+    fun setNanOff(off: Boolean) {
+        if (!nanSwitchOffered) return
+        viewModelScope.launch { settings.setDebugNanOff(off) }
+    }
+
     /**
      * The BLE Coded PHY experiment's mode (ADR 2026-10.yvn6), or null where the build keeps it dark — which is also
      * whether the row shows. Its own flow for the same reason as [bleLinkCap]; the transport collects the same key.
