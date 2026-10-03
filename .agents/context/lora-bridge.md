@@ -84,7 +84,7 @@ custody / relay all run unchanged.
 > with no board of its own is routinely in it. Nothing above the composite may read it as proximity:
 > `MeshController.neighbors` (the notification count, the Contacts online dot, Diagnostics' *Directly
 > connected*) is `CompositeMeshTransport.shortRangeReachable`; the full union is `MeshController.reachable`
-> and only Diagnostics' *Reachable via relay* reads it. Writes are gated on
+> and only Diagnostics' *Reachable long-range* reads it. Writes are gated on
 > `mesh/FramePresence.kt`'s `isPresenceEvidence` (shared with the Internet plane, which needed the same
 > rule) — 15 min for everything except `profile`, which gets 13 h (the
 > 12 h `PROFILE_REPUBLISH_MS` cadence plus slack) — because the ADR 044 backfill, the ADR 039 re-offer
@@ -902,7 +902,7 @@ where no other Knit board is listening. Set the Meshtastic app's device to **Non
 - Broadcast: `…debug.SEND --es conv nearby --es text …` on A → appears on B within ~5–10 s; A's tick flips
   ✓✓ (sealed tick over LoRa); a reaction crosses. Move B out of BLE/NAN range and repeat. Counters:
   `loraSent/loraReceived/loraReassembled` climb, `loraNak == 0`, `loraDroppedQueue == 0` at chat pace,
-  `loraTooBig` only for long posts. Diagnostics lists a LoRa-reachable node under **Reachable via relay**
+  `loraTooBig` only for long posts. Diagnostics lists a LoRa-reachable node under **Reachable long-range**
   tagged `LoRa`, never under *Directly connected* (ADR 2026-09.2ajk).
 - DM (ADR 039): `…debug.SEND --es conv <peerId> --es text …` on A → appears on B within ~10 s; A's tick
   flips ✓✓ (the sealed receipt crossed back); `loraDmSent`/`loraDmReceived` climb on both, `loraTooBig == 0`.

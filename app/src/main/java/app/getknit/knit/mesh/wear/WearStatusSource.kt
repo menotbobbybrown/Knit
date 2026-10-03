@@ -181,7 +181,7 @@ object WearStatusPolicy {
 
     /**
      * The peer map. Short-range peers are Diagnostics' "Direct" section (their BLE / NAN planes); far ones its
-     * "Reachable via relay" (a LoRa path, or the relay under [spoolPresentPeers]'s evidence rule) — the same
+     * "Reachable long-range" (a LoRa path, or an Internet relay under [spoolPresentPeers]'s evidence rule) — the same
      * split, so a peer is never drawn nearer than that screen lists it. Sorted by node id so a peer keeps its
      * slot between reads; up to two slots go to far peers when there are any, so a crowd nearby never hides
      * that the long-range planes are carrying someone.

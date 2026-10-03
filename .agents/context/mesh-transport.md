@@ -211,7 +211,7 @@ split is different and easy to get backwards (ADR 2026-09.2ajk):
   Contacts online dot, Profile Details, the group member picker, and Diagnostics' *Directly connected*.
   Only a short-range plane sights the peer's **own** radio.
 - **`MeshController.reachable`** — the full union, long-range planes included. A superset, read only by
-  Diagnostics' *Reachable via relay*. A LoRa entry names the plane a frame arrived over, not proximity
+  Diagnostics' *Reachable long-range*. A LoRa entry names the plane a frame arrived over, not proximity
   and not the peer's hardware: LoRa keys presence on the frame *author*, and a gateway carries other
   people's frames, so a phone with no board at all appears here (`context/lora-bridge.md`).
 - **`MeshController.shortRangeKinds`** — which `TransportKind`s count as short-range, read off

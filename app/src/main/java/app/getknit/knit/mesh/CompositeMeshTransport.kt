@@ -165,7 +165,7 @@ class CompositeMeshTransport(
      * A **long-range** kind here names the plane a frame arrived over, never proximity and never the peer's
      * own hardware: a LoRa entry means somebody's board put that author's frame on air, which may be a
      * gateway relaying for a peer with no board at all (ADR 044). [shortRangeKinds] is how a consumer tells
-     * the two apart — the Diagnostics screen shows long-range kinds only under *reachable via relay*.
+     * the two apart — the Diagnostics screen shows long-range kinds only under *Reachable long-range*.
      */
     val peerTransports: StateFlow<Map<String, Set<TransportKind>>> =
         if (children.isEmpty()) {

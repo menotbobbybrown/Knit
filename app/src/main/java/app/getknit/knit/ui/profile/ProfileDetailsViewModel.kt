@@ -139,7 +139,7 @@ data class ProfileDetailsUiState(
     val status: String,
     val avatarHash: String?,
     // Live presence, by the best evidence we have — the same three tiers Diagnostics sorts its sections
-    // by, so a peer it lists under "Reachable via relay" never reads as offline here.
+    // by, so a peer it lists under "Reachable long-range" never reads as offline here.
     val reach: Reach,
     val isBlocked: Boolean,
     // E2E verification: whether we hold the peer's key yet, whether the user has verified it, the

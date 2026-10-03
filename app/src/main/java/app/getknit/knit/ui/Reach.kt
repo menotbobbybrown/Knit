@@ -7,7 +7,7 @@ import app.getknit.knit.mesh.MeshController
  * three tiers. Ordered strongest first; a node is classified by the best evidence it has.
  *
  * One rule for every surface that draws a presence dot with a label beside it — Diagnostics' three sections
- * and the Profile status line — so a peer Diagnostics lists under "Reachable via relay" can never read as
+ * and the Profile status line — so a peer Diagnostics lists under "Reachable long-range" can never read as
  * "Offline" on their profile. Both derive from [reachOf] over the same three inputs.
  */
 enum class Reach {

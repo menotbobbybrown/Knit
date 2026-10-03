@@ -99,7 +99,7 @@ private const val NAMED_GROUPS_MAX = 3
 
 /**
  * Read-only "contact details" view of another peer (keyed by [nodeId]): avatar, display name, live
- * presence (online / reachable via relay / offline), free-text status, node id, and end-to-end key
+ * presence (online / reachable long-range / offline), free-text status, node id, and end-to-end key
  * verification (safety number + QR scan). Offers a Message action (accepts any pending request from this
  * peer, then opens/starts a DM via [onMessage]), and Remove contact and Block/Unblock in the overflow menu.
  * Reached by tapping a peer's avatar in a chat, or a sender's avatar in the Message Requests inbox.

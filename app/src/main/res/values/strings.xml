@@ -587,7 +587,7 @@
     <!-- Profile details (another peer) -->
     <string name="profile_details_message">Message</string>
     <string name="profile_details_online">Online</string>
-    <string name="profile_details_via_relay">Reachable via relay</string>
+    <string name="profile_details_via_relay">Reachable long-range</string>
     <string name="profile_details_offline">Offline</string>
     <string name="profile_details_open_to_chat">Open to chat</string>
     <string name="profile_details_view_photo">View photo</string>
@@ -691,9 +691,9 @@
     <string name="diagnostics_supervised_managed">Managed phone</string>
     <string name="diagnostics_metrics">Mesh metrics</string>
     <string name="diagnostics_directly_connected">Directly connected (%1$d)</string>
-    <string name="diagnostics_via_relay">Reachable via relay (%1$d)</string>
+    <string name="diagnostics_via_relay">Reachable long-range (%1$d)</string>
     <string name="diagnostics_none_direct">No direct connections</string>
-    <string name="diagnostics_none_relay">Nothing reachable via relay</string>
+    <string name="diagnostics_none_relay">Nothing reachable long-range</string>
     <string name="diagnostics_known_nodes">Known, not reachable (%1$d)</string>
     <string name="diagnostics_known_more">…and %1$d more</string>
     <string name="diagnostics_profile_age">Profile %1$s</string>
@@ -775,7 +775,7 @@
     <string name="diagnostics_tag_ble">BLE</string>
     <string name="diagnostics_tag_nan">NAN</string>
     <string name="diagnostics_tag_lora">LoRa</string>
-    <string name="diagnostics_tag_spool">Relay</string>
+    <string name="diagnostics_tag_spool">Internet</string>
     <string name="diagnostics_transport_audio">audio</string>
     <!-- The Wi-Fi Aware initiator hold (ADR 2026-09.m8kc): the row tag, and the section under Transports with
          the way back. The plane itself is healthy — only this phone's own connection attempts are stopped. -->
