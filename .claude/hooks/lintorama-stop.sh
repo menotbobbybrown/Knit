@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Stop hook: enforce the `lintorama` container (bundled shellcheck + markdownlint + yamllint)
-# before Claude finishes a turn.
+# Stop hook: enforce the `lintorama` container (bundled yamllint + shellcheck + hadolint + markdownlint +
+# luacheck + ruff + actionlint + check-jsonschema + editorconfig-checker) before Claude finishes a turn.
 #
 # lintorama clean        -> exit 0, Claude stops normally.
 # lintorama finds issues -> exit 2 with the findings on stderr, which Claude Code feeds back to the
@@ -22,25 +22,22 @@ project_dir="${CLAUDE_PROJECT_DIR:-$(pwd)}"
 cd "$project_dir" || exit 0
 
 # The linter ships as a published image on Docker Hub; pull it once on first use.
-image="zaventh/lintorama:6"
+image="zaventh/lintorama:8"
 
 # Skip cleanly if docker is missing, or the image isn't cached and can't be pulled (don't block a turn
 # on missing tooling / no network).
 command -v docker >/dev/null 2>&1 || exit 0
 docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image" >/dev/null 2>&1 || exit 0
 
-# In a linked worktree `.git` is a pointer file whose absolute `gitdir:` target lives under the main
-# repo's `.git`; mount that directory at the same absolute path so git resolves inside the container.
-git_mounts=(-v "$project_dir"/.git:/code/.git)
-if [ -f "$project_dir/.git" ]; then
-  common_dir=$(git -C "$project_dir" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
-  [ -n "$common_dir" ] && git_mounts+=(-v "$common_dir":"$common_dir")
+# Mount the repo's shared Git dir at its host path so a worktree's `.git` file (which points into
+# it) resolves inside the container. Only mount it if git finds one: docker would otherwise create
+# the missing host path as an empty root-owned directory.
+mounts=(-v "$project_dir":/code)
+if gitdir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+  mounts+=(-v "$gitdir":"$gitdir")
 fi
 
-output=$(docker run --rm \
-  -v "$project_dir":/code \
-  "${git_mounts[@]}" \
-  "$image" 2>&1)
+output=$(docker run --rm "${mounts[@]}" "$image" 2>&1)
 status=$?
 
 if [ "$status" -ne 0 ]; then

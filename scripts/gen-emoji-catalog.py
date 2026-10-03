@@ -41,8 +41,9 @@ import re
 import sys
 import urllib.request
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, NamedTuple
+from typing import NamedTuple
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 VENDOR_DIR = REPO_ROOT / "third_party" / "unicode-emoji"
@@ -164,7 +165,7 @@ def report(entries: list[Entry], stats: Counter) -> None:
     per_group = Counter(GROUPS[e.group] for e in entries)
     print(f"wrote {len(entries)} emoji -> {OUTPUT_TSV.relative_to(REPO_ROOT)}", file=sys.stderr)
     print(
-        f"  statuses: " + "  ".join(f"{k}={v}" for k, v in sorted(stats.items())) + f"  |  tone variants kept: {tones}",
+        "  statuses: " + "  ".join(f"{k}={v}" for k, v in sorted(stats.items())) + f"  |  tone variants kept: {tones}",
         file=sys.stderr,
     )
     print("  per group: " + "  ".join(f"{g}={per_group[g]}" for g in GROUPS), file=sys.stderr)
@@ -174,7 +175,7 @@ def update(version: str) -> None:
     VENDOR_DIR.mkdir(parents=True, exist_ok=True)
     for url, dest in ((SOURCE_URL_TEMPLATE.format(version=version), SOURCE_TXT), (LICENSE_URL, SOURCE_LICENSE)):
         print(f"fetching {url}", file=sys.stderr)
-        with urllib.request.urlopen(url) as resp:  # noqa: S310 - fixed https hosts
+        with urllib.request.urlopen(url) as resp:
             dest.write_bytes(resp.read())
     src = source_info(SOURCE_TXT.read_text(encoding="utf-8"))
     print(

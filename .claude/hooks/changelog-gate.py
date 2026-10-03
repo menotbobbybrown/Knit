@@ -195,7 +195,7 @@ def findings_for(bullet: str, raw: list[str]) -> list[str]:
 def main() -> int:
     try:
         payload = json.load(sys.stdin)
-    except Exception:
+    except ValueError:
         return 0
 
     path = ((payload.get("tool_input") or {}).get("file_path")) or ""

@@ -29,6 +29,7 @@ import collections
 import os
 import re
 import sys
+from pathlib import Path
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SRC = os.path.join(ROOT, "app/src/main/java")
@@ -83,10 +84,10 @@ def collect():
         for f in sorted(files):
             if not f.endswith(".kt"):
                 continue
-            src = open(os.path.join(dirpath, f), encoding="utf-8").read()
+            src = Path(dirpath, f).read_text(encoding="utf-8")
             if "@Preview" not in src:
                 continue
-            pkg = re.search(r"^package (\S+)", src, re.M).group(1)
+            pkg = re.search(r"^package (\S+)", src, re.MULTILINE).group(1)
             for m in PREVIEW.finditer(src):
                 name = m.group(2)
                 if m.group(1):
@@ -123,8 +124,10 @@ def render(pkg, previews):
                 f"/** {doc} */",
                 "@PreviewTest",
                 f'@Preview(name = "Light-{scale}x", showBackground = true, fontScale = {scale}f)',
-                f'@Preview(name = "Dark-{scale}x", showBackground = true, fontScale = {scale}f, '
-                "uiMode = Configuration.UI_MODE_NIGHT_YES)",
+                (
+                    f'@Preview(name = "Dark-{scale}x", showBackground = true, fontScale = {scale}f, '
+                    "uiMode = Configuration.UI_MODE_NIGHT_YES)"
+                ),
                 "@Composable",
                 f"fun {w}{suffix}() = {n}()",
                 "",
@@ -142,7 +145,7 @@ def main():
     stale = sorted(
         f
         for f in wanted.keys() | present
-        if f not in wanted or f not in present or open(os.path.join(OUT, f), encoding="utf-8").read() != wanted[f]
+        if f not in wanted or f not in present or Path(OUT, f).read_text(encoding="utf-8") != wanted[f]
     )
     if check:
         if stale:
@@ -152,7 +155,7 @@ def main():
     for f in present - wanted.keys():
         os.remove(os.path.join(OUT, f))
     for f, text in wanted.items():
-        open(os.path.join(OUT, f), "w", encoding="utf-8").write(text)
+        Path(OUT, f).write_text(text, encoding="utf-8")
     print(f"✓ wrote {len(wanted)} files, {sum(t.count('@PreviewTest') for t in wanted.values())} subjects")
 
 

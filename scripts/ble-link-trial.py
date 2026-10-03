@@ -36,7 +36,6 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import os
 import re
 import signal
 import statistics
@@ -132,7 +131,7 @@ class Phone:
     def power(self) -> dict:
         out = self.sh("dumpsys power | grep -m1 mWakefulness=; dumpsys deviceidle | grep -m1 mState=; "
                       "dumpsys battery | grep -E -m3 'AC powered|USB powered|level'; settings get global bluetooth_on")
-        get = lambda pat: (m.group(1) if (m := re.search(pat, out)) else None)  # noqa: E731
+        get = lambda pat: (m.group(1) if (m := re.search(pat, out)) else None)
         return {
             "wakefulness": get(r"mWakefulness=(\w+)"),
             "deepIdle": get(r"mState=(\w+)"),
@@ -266,7 +265,7 @@ class Trial:
         for p in self.phones.values():
             state = p.bridge("STATE")
             p.node_id, p.name = state["self"]["nodeId"], state["self"].get("name", "")
-            if not p.sh("settings get global bluetooth_on").strip() == "1":
+            if p.sh("settings get global bluetooth_on").strip() != "1":
                 sys.exit(f"{p.label}: Bluetooth is off; switch it on first")
             rtt = p.measure_offset()
             log(f"{p.label} {p.node_id} '{p.name}' offset={p.offset:+.3f}s rtt={rtt * 1000:.0f}ms")
@@ -500,7 +499,7 @@ class Trial:
     def decompose(self, t0: float, t_down: float, end: float) -> dict:
         """What each phone's transport did about the other between the stimulus and the link."""
         t, o = self.toggled, self.other
-        rel = lambda h: round(h - t0, 2)  # noqa: E731
+        rel = lambda h: round(h - t0, 2)
         d: dict = {"events": []}
         attempts, refusals, accepts = [], [], []
         first_init = None
@@ -566,7 +565,7 @@ def pct(xs: list[float], q: float) -> float:
 def summary(dirs: list[str]) -> None:
     groups: dict[tuple, list[dict]] = defaultdict(list)
     for d in dirs:
-        for line in open(Path(d).expanduser() / "reps.jsonl", encoding="utf-8"):
+        for line in (Path(d).expanduser() / "reps.jsonl").read_text(encoding="utf-8").splitlines():
             r = json.loads(line)
             key = (r["pair"], r["scenario"], f"{r['toggled']}({r['role']})", r["screen"], r["nan"], r["cell"])
             groups[key].append(r)
@@ -579,8 +578,8 @@ def summary(dirs: list[str]) -> None:
         inits = [r["first_initiating"]["at_s"] for r in ran if r.get("first_initiating")]
         reasons = Counter(a["reason"] for r in ran for a in r.get("attempts", []) if not a["ok"])
         n = len(ran)
-        within = lambda s: f"{sum(1 for x in ok if x <= s) / n:.0%}" if n else "-"  # noqa: E731
-        stat = lambda f: f"{f:6.1f}" if ok else f"{'-':>6}"  # noqa: E731
+        within = lambda s, ok=ok, n=n: f"{sum(1 for x in ok if x <= s) / n:.0%}" if n else "-"
+        stat = lambda f, ok=ok: f"{f:6.1f}" if ok else f"{'-':>6}"
         print(f"{key[0]:8} {key[1]:9} {key[2]:16} {key[3]:6} {key[4]:5} {key[5]:7} {n:3} {len(ok):3} "
               f"{stat(statistics.median(ok) if ok else 0)} {stat(pct(ok, 0.9) if ok else 0)} {stat(max(ok) if ok else 0)} "
               f"{within(30):>5} {within(60):>5} {within(120):>5} "
