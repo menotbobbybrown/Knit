@@ -349,9 +349,7 @@ class FramedLinkTest {
                     if (bodyBeforeFrame == null) bodyBeforeFrame = received.size()
                 }
 
-                else -> {
-                    Unit
-                }
+                else -> {}
             }
             rec = LinkFraming.read(h.fromLink)
         }
