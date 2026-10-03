@@ -50,7 +50,9 @@ import androidx.compose.ui.unit.dp
 import app.getknit.knit.R
 import app.getknit.knit.data.VoiceAudio
 import app.getknit.knit.data.relay.AttachmentWait
-import app.getknit.knit.ui.chat.WaitingIndicator
+import app.getknit.knit.mesh.ArrivingFile
+import app.getknit.knit.ui.chat.ArrivalIndicator
+import app.getknit.knit.ui.chat.arrivalText
 import app.getknit.knit.ui.chat.attachmentWaitHint
 import app.getknit.knit.ui.preview.KnitPreview
 import app.getknit.knit.ui.theme.KnitMotion
@@ -153,21 +155,23 @@ fun VoiceNoteBubble(
     wait: AttachmentWait = AttachmentWait.Nearby,
     // The blob's hash, which keys the placeholder's spinner-to-hourglass settle.
     hash: String? = null,
+    // How far the bytes have got while they stream in over a nearby link (#115); null while none is carrying them.
+    arrival: ArrivingFile? = null,
 ) {
     if (!ready) {
         Row(
             modifier = modifier.width(BUBBLE_WIDTH).padding(vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            WaitingIndicator(key = hash, size = 20.dp, color = accent)
+            ArrivalIndicator(key = hash, arrival = arrival, size = 20.dp, color = accent)
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
-                    text = stringResource(R.string.chat_voice_loading),
+                    text = arrival?.let { arrivalText(it) } ?: stringResource(R.string.chat_voice_loading),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                attachmentWaitHint(wait)?.let { hint ->
+                attachmentWaitHint(wait, arrival)?.let { hint ->
                     Text(
                         text = hint,
                         style = MaterialTheme.typography.labelSmall,
@@ -492,6 +496,25 @@ fun VoiceNoteLoadingPreview() =
             onToggle = {},
             onSeek = {},
             onLongClick = {},
+        )
+    }
+
+/** A voice note whose bytes are streaming in over a nearby link: the ring and how much has crossed (#115). */
+@Preview(showBackground = true)
+@Composable
+fun VoiceNoteArrivingPreview() =
+    KnitPreview {
+        VoiceNoteBubble(
+            ready = false,
+            durationMs = null,
+            peaks = null,
+            positionMs = null,
+            playing = false,
+            accent = MaterialTheme.colorScheme.primary,
+            onToggle = {},
+            onSeek = {},
+            onLongClick = {},
+            arrival = ArrivingFile("preview", bytes = 38_000, total = 61_000),
         )
     }
 

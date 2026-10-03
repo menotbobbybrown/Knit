@@ -212,4 +212,5 @@ carries; never renumber an old one.
 | [2026-10.gtmm](decisions/2026-10-gtmm-compose-previews-are-screenshot-tested-on-the-alpha-preview-plugin.md) | Compose previews are screenshot-tested on the alpha preview plugin | testing, toolchain, ui |
 | [2026-10.pj9w](decisions/2026-10-pj9w-ble-discovery-waits-run-on-the-elapsed-clock.md) | BLE discovery waits run on the elapsed clock, and a dial wakes when its dwell ripens | ble, transport, power |
 | [2026-10.ryak](decisions/2026-10-ryak-the-ble-presence-advert-runs-at-full-power.md) | The BLE presence advert runs at full power | ble, mesh, power |
+| [2026-10.y9qh](decisions/2026-10-y9qh-a-receiver-shows-how-far-an-incoming-attachment-has-got.md) | A receiver shows how far an incoming attachment has got | mesh, attachments, wire, ui |
 | [2026-10.yvn6](decisions/2026-10-yvn6-ble-links-step-down-to-the-coded-phy-at-range.md) | BLE links step down to the Coded PHY at range | ble, mesh, power |

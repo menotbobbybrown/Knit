@@ -6,7 +6,7 @@ Byte-exact fixtures that every Knit port is tested against. The Android tests he
 | File | Written by | Checked by | What it pins |
 | --- | --- | --- | --- |
 | `wire-v1.json` | `GoldenVectorTest` | `GoldenVectorTest`, knit-ios | The definite-length CBOR of one fixed instance of every wire type, and the raw-key bundle probe with its node id |
-| `keyed-v1.json` | `KeyedVectorTest` | `KeyedVectorTest`, knit-ios | Two identities from fixed keys, the profile and room post Alice signs, a v1 DM she seals to Bob, their safety number, and the HELLO, DIGEST, custody fingerprint and advert |
+| `keyed-v1.json` | `KeyedVectorTest` | `KeyedVectorTest`, knit-ios | Two identities from fixed keys, the profile and room post Alice signs, a v1 DM she seals to Bob, their safety number, and the HELLO, DIGEST, file header, custody fingerprint and advert |
 | `ios-emitted-v1.json` | knit-ios | `IosEmittedVectorTest` | Carol's identity, the profile and room post she signs on iOS, a v1 DM she seals to Bob, and their safety number |
 
 ## Regenerating

@@ -36,6 +36,9 @@ class FakeMeshController : MeshController {
     override val peerTransports = MutableStateFlow<Map<String, Set<TransportKind>>>(emptyMap())
     override val typing = MutableStateFlow<Map<String, Set<String>>>(emptyMap())
 
+    /** What the links report streaming in; a state flow, so `advanceUntilIdle()` idles where a real poll would not. */
+    override val arrivals = MutableStateFlow<Map<String, ArrivingFile>>(emptyMap())
+
     var startCount = 0
     var stopCount = 0
     var healCount = 0

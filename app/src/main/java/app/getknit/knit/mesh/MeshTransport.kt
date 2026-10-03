@@ -125,7 +125,7 @@ enum class FileKind(
 
 /**
  * Metadata sent alongside a file so the receiver can identify it: [kind] (avatar vs attachment),
- * [key] (the avatar's node id, or an attachment's content hash), and the file's [mime] type.
+ * [key] (the blob's content hash, an avatar's too), and the file's [mime] type.
  */
 data class FileMeta(
     val kind: FileKind,
@@ -141,6 +141,26 @@ data class ReceivedFile(
     val key: String,
     val mime: String,
 )
+
+/**
+ * A file streaming in on a live link right now (#115): its [key], the [bytes] in so far, and the [total] its
+ * sender declared in the `FILE_HEADER` — null from a build that predates the field. The total is a label, never
+ * a bound (the link holds its own ceiling); one the bytes have overrun is no total at all, so [fraction] is null
+ * and the bubble shows the bytes alone.
+ */
+data class ArrivingFile(
+    val key: String,
+    val bytes: Long,
+    val total: Long?,
+) {
+    /** The share in so far, 0..1, or null when there is no total to hold the bytes against. */
+    val fraction: Float?
+        get() = total?.takeIf { it > 0 && bytes <= it }?.let { bytes.toFloat() / it }
+}
+
+/** One entry per key; when two links stream the same blob, the copy furthest along is the one that counts. */
+fun Iterable<ArrivingFile>.furthestByKey(): Map<String, ArrivingFile> =
+    groupingBy { it.key }.reduce { _, kept, other -> if (other.bytes > kept.bytes) other else kept }
 
 /**
  * A store-and-forward digest received from a neighbor: the message [ids] it currently holds in custody, so we
@@ -323,14 +343,16 @@ interface MeshTransport {
     fun expectBulkTransfer(nodeId: String): Boolean = false
 
     /**
-     * The keys of files whose bytes are streaming **in** on a live link right now — a `FILE_HEADER` has
-     * arrived and its `FILE_END` has not. Read by `BlobExchange` so a blob already on the way is neither
-     * wanted again nor re-asked for on the 60 s tick: a re-ask against a slow BLE transfer bought a second
-     * full copy from every holder (work item #79). A pull, like the side scan's `streamInFlight` (ADR
-     * 2026-09.u8qj), so there is no memo to expire or abort to signal — a torn link clears its own state and
-     * the next tick asks again. Default empty: a plane with no data path (LoRa) carries no files.
+     * The files whose bytes are streaming **in** on a live link right now — a `FILE_HEADER` has arrived and
+     * its `FILE_END` has not — by key, with how far each has got. `BlobExchange` reads only the keys, so a blob
+     * already on the way is neither wanted again nor re-asked for on the 60 s tick: a re-ask against a slow
+     * BLE transfer bought a second full copy from every holder (work item #79). The chat reads the bytes and
+     * the declared total to draw the attachment's progress (#115). A pull, like the side scan's
+     * `streamInFlight` (ADR 2026-09.u8qj), so there is no memo to expire or abort to signal — a torn link
+     * clears its own state and the next tick asks again. Default empty: a plane with no data path (LoRa)
+     * carries no files.
      */
-    fun arrivingFiles(): Set<String> = emptySet()
+    fun arrivingFiles(): Map<String, ArrivingFile> = emptyMap()
 
     /**
      * True while a file under [key] is queued on, or streaming over, a live link toward [nodeId] — from the

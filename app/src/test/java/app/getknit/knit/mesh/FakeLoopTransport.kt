@@ -81,7 +81,7 @@ class FakeLoopTransport(
         return true
     }
 
-    override fun arrivingFiles(): Set<String> = arriving.toSet()
+    override fun arrivingFiles(): Map<String, ArrivingFile> = arriving.associateWith { ArrivingFile(it, bytes = 0, total = null) }
 
     override fun fileInFlightTo(
         nodeId: String,

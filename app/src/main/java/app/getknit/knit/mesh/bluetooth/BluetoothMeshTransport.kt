@@ -20,6 +20,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import app.getknit.knit.BuildConfig
 import app.getknit.knit.identity.Identity
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.BleSideDrop
 import app.getknit.knit.mesh.ConnectFailReason
 import app.getknit.knit.mesh.FileMeta
@@ -34,6 +35,7 @@ import app.getknit.knit.mesh.StoreDigest
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.TransportKind
 import app.getknit.knit.mesh.bleSupport
+import app.getknit.knit.mesh.furthestByKey
 import app.getknit.knit.mesh.link.FrameKey
 import app.getknit.knit.mesh.link.FramedLink
 import app.getknit.knit.mesh.link.LinkCallbacks
@@ -583,7 +585,7 @@ class BluetoothMeshTransport(
         return accepted
     }
 
-    override fun arrivingFiles(): Set<String> = links.values.mapNotNullTo(HashSet()) { it.rxKey }
+    override fun arrivingFiles(): Map<String, ArrivingFile> = links.values.mapNotNull { it.rxFile }.furthestByKey()
 
     override fun fileInFlightTo(
         nodeId: String,

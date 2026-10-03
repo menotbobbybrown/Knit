@@ -149,8 +149,17 @@ internal object LinkFraming {
 
     fun encodeFileHeader(header: FileHeaderWire): ByteArray = json.encodeToString(header).encodeToByteArray()
 
-    fun decodeFileHeader(payload: ByteArray): FileHeaderWire? =
-        runCatching { json.decodeFromString<FileHeaderWire>(payload.decodeToString()) }.getOrNull()
+    /**
+     * The header, or null when it is not one. A header whose [FileHeaderWire.size] will not decode (a string, a
+     * fraction, out of range) is read without it: the size is only a label, and a failed decode aborts the file
+     * that follows, so only the three fields the receiver routes on may cost the transfer (#115).
+     */
+    fun decodeFileHeader(payload: ByteArray): FileHeaderWire? {
+        val text = payload.decodeToString()
+        return runCatching { json.decodeFromString<FileHeaderWire>(text) }.getOrNull()
+            ?: runCatching { json.decodeFromString<FileHeaderCore>(text).let { FileHeaderWire(it.kind, it.key, it.mime) } }
+                .getOrNull()
+    }
 
     fun encodeDigest(digest: DigestWire): ByteArray = json.encodeToString(digest).encodeToByteArray()
 
@@ -160,10 +169,25 @@ internal object LinkFraming {
 
 /**
  * Sent as the [LinkFraming.Type.FILE_HEADER] record ahead of a file's chunks so the receiver can route
- * it: [kind] (avatar vs attachment), [key] (avatar's node id or attachment content hash), and [mime].
+ * it: [kind] (avatar vs attachment), [key] (the blob's content hash, an avatar's too), and [mime].
+ *
+ * [size] is the byte count of the stream that follows, so the receiver can show how far it has got (#115). A
+ * label, never a bound: the receiver still counts the bytes and holds its own ceiling, and shows a sender that
+ * sends more than it declared by bytes alone. Null from a build that predates the field, which an older
+ * receiver skips under `ignoreUnknownKeys`. This config encodes defaults, so a null would go out as
+ * `"size":null` — the sender always fills it.
  */
 @Serializable
 internal data class FileHeaderWire(
+    val kind: String,
+    val key: String,
+    val mime: String,
+    val size: Long? = null,
+)
+
+/** The fields a receiver routes on, for a header whose [FileHeaderWire.size] will not decode. */
+@Serializable
+private data class FileHeaderCore(
     val kind: String,
     val key: String,
     val mime: String,

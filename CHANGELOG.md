@@ -25,6 +25,9 @@ document:
 - Diagnostics now lists people whose messages reach you through another nearby phone under Reachable
   indirectly, along with the phone that passed them on. Their profile says Reachable indirectly too, where it
   used to say Offline.
+- A photo, voice message or file on its way from a nearby phone now shows how much has arrived, with a ring
+  that fills as the rest comes in. On a slow Bluetooth connection, you can tell a transfer that's still moving
+  from one that's stuck.
 
 ### Fixed
 

@@ -636,6 +636,19 @@ older Android build ignores the bit, and the iPhone then simply sleeps through i
 ctl, no version bump, no discovery marker, no DB change, and every golden vector is unmoved. The two GATT UUIDs are
 pinned in `DoorbellPolicyTest` beside it: the characteristic is law from the first build that rings it.
 
+**Precedent — the first field added to a link record (`FileHeaderWire.size`, the stream's length, ADR
+2026-10.y9qh, #115).** The `FILE_HEADER` record carries JSON, not CBOR, under its own config
+(`ignoreUnknownKeys = true`, `encodeDefaults = true`, `LinkFraming.kt`), so rule 1 holds only by its second half:
+a null is not omitted here, it goes out as `"size":null`. The field is additive because every reader skips a key
+it does not know — every Android build since before v2.0.0, and the iOS port's `Decodable` header (its
+`LinkTests` pin an unknown key; it discards file records until it takes attachments) — and because the sender
+always fills it. A `size` that will not decode costs the label, never the file: a failed header decode aborts the
+transfer behind it, so `decodeFileHeader` falls back to the three routed fields. No capability bit (the size gates
+nothing, trusts nothing and hides nothing — a label, never a bound, like `attachmentSize`), no version bump, no
+discovery marker, no DB change. `vectors/keyed-v1.json` gained a `fileHeader` record and moved nothing.
+*Metadata cost:* none new — the chunk lengths on the link already sum to the size, and a carrier that pulls the
+blob holds every byte of it.
+
 **When you bump a version layer:** add a round-trip test plus an "unknown higher version drops locally
 but is counted" test. New crypto scheme ⇒ bump `EncEnvelope.MAX_SUPPORTED_VERSION` + every branch that
 tests the version (`InboundPipeline.decryptAndDeliver`, `MeshManager`'s inline-ack give-back,

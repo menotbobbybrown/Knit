@@ -13,6 +13,7 @@ import app.getknit.knit.data.message.DeliveryPlane
 import app.getknit.knit.data.relay.AttachmentRelay
 import app.getknit.knit.data.relay.AttachmentWait
 import app.getknit.knit.data.relay.RelayReach
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.ui.theme.KnitTheme
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -60,6 +61,7 @@ class ChatRelayIndicatorTest {
         reach: RelayReach = RelayReach.Silent,
         staged: AttachmentRelay = AttachmentRelay.Silent,
         onDismissRelayNotice: () -> Unit = {},
+        arrivals: Map<String, ArrivingFile> = emptyMap(),
     ) {
         compose.setContent {
             KnitTheme {
@@ -96,6 +98,7 @@ class ChatRelayIndicatorTest {
                     onCopy = {},
                     onSaveAttachment = { _, _, _ -> },
                     onDismissRelayNotice = onDismissRelayNotice,
+                    arrivals = arrivals,
                 )
             }
         }
@@ -199,6 +202,18 @@ class ChatRelayIndicatorTest {
         render(rows = listOf(row(mine = false, attachmentReady = false, attachmentWait = AttachmentWait.Nearby)))
         compose.onNodeWithText(LOADING_PHOTO).assertIsDisplayed()
         compose.onNodeWithTag("chat_attachment_wait").assertDoesNotExist()
+    }
+
+    @Test
+    fun aPhotoStreamingInDropsTheRelayLine() {
+        // Its bytes are already coming over a nearby link (#115), so where else they could come from has nothing
+        // to add; the line comes back if the link drops them.
+        render(
+            rows = listOf(row(mine = false, attachmentReady = false, attachmentWait = AttachmentWait.Relay)),
+            arrivals = mapOf("h1" to ArrivingFile("h1", bytes = 84_000, total = 204_000)),
+        )
+        compose.onNodeWithTag("chat_attachment_wait").assertDoesNotExist()
+        compose.onNodeWithText(LOADING_PHOTO).assertDoesNotExist()
     }
 
     @Test

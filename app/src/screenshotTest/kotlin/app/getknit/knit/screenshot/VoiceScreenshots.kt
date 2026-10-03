@@ -1,6 +1,7 @@
 package app.getknit.knit.screenshot
 
 import androidx.compose.runtime.Composable
+import app.getknit.knit.ui.voice.VoiceNoteArrivingPreview
 import app.getknit.knit.ui.voice.VoiceNoteBubblePreview
 import app.getknit.knit.ui.voice.VoiceNoteLoadingPreview
 import app.getknit.knit.ui.voice.VoiceRecordingBarLockedPreview
@@ -18,6 +19,11 @@ fun VoiceNoteBubble() = VoiceNoteBubblePreview()
 @ComponentShots
 @Composable
 fun VoiceNoteLoading() = VoiceNoteLoadingPreview()
+
+@PreviewTest
+@ComponentShots
+@Composable
+fun VoiceNoteArriving() = VoiceNoteArrivingPreview()
 
 @PreviewTest
 @ComponentShots

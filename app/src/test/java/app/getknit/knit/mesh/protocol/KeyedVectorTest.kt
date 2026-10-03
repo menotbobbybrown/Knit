@@ -1,12 +1,14 @@
 package app.getknit.knit.mesh.protocol
 
 import app.getknit.knit.identity.DeviceTag
+import app.getknit.knit.mesh.FileKind
 import app.getknit.knit.mesh.StoreDigest
 import app.getknit.knit.mesh.bluetooth.BleAdvertPayload
 import app.getknit.knit.mesh.crypto.MessageContent
 import app.getknit.knit.mesh.crypto.MessageCrypto
 import app.getknit.knit.mesh.crypto.SafetyNumber
 import app.getknit.knit.mesh.link.DigestWire
+import app.getknit.knit.mesh.link.FileHeaderWire
 import app.getknit.knit.mesh.link.LinkFraming
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
@@ -44,6 +46,7 @@ class KeyedVectorTest {
     private val roomPostId = FrameId.fromBytes(fixtureBytes(16, 21))
     private val dmId = FrameId.fromBytes(fixtureBytes(16, 22))
     private val digestIds = listOf(profileId, roomPostId, dmId)
+    private val fileKey = fixtureBytes(32, 23).toHex()
 
     /** Alice's profile, shaped like `MeshManager.currentProfileEnvelope` minus the v2 prekey. */
     private fun profileFrame(): RelayEnvelope =
@@ -136,6 +139,13 @@ class KeyedVectorTest {
 
     private fun advert(): ByteArray = BleAdvertPayload.encode(alice.nodeId, CAPABILITIES, fold(), PSM)
 
+    // A photo's header as a sender writes it, the stream's length included (#115).
+    private fun fileHeaderRecord(): ByteArray =
+        LinkFraming.encode(
+            LinkFraming.Type.FILE_HEADER,
+            LinkFraming.encodeFileHeader(FileHeaderWire(FileKind.ATTACHMENT.wire, fileKey, FILE_MIME, size = FILE_SIZE)),
+        )
+
     private fun safetyNumber(): String = SafetyNumber.compute(alice.nodeId, alice.bundle.encoded, bob.nodeId, bob.bundle.encoded)
 
     private val file: JsonObject by lazy { VectorFiles.read(FILE) }
@@ -209,6 +219,7 @@ class KeyedVectorTest {
         assertEquals(link("digest").getValue("record").jsonPrimitive.content, digestRecord().toHex())
         assertEquals(link("digestFold").getValue("fold").jsonPrimitive.content, "%016x".format(fold()))
         assertEquals(link("advert").getValue("serviceData").jsonPrimitive.content, advert().toHex())
+        assertEquals(link("fileHeader").getValue("record").jsonPrimitive.content, fileHeaderRecord().toHex())
 
         val parsedHello = Protocol.parse(helloPayload().decodeToString())
         assertEquals(alice.nodeId, parsedHello.nodeId)
@@ -280,6 +291,13 @@ class KeyedVectorTest {
                 putJsonArray("ids") { digestIds.forEach { add(it) } }
                 put("fold", "%016x".format(fold()))
             }
+            putJsonObject("fileHeader") {
+                put("kind", FileKind.ATTACHMENT.wire)
+                put("key", fileKey)
+                put("mime", FILE_MIME)
+                put("size", FILE_SIZE)
+                put("record", fileHeaderRecord().toHex())
+            }
             putJsonObject("advert") {
                 put("nodeId", alice.nodeId)
                 put("capabilities", CAPABILITIES)
@@ -294,7 +312,7 @@ class KeyedVectorTest {
         const val FILE = "keyed-v1.json"
         const val ABOUT =
             "Keyed vectors: two fixed identities, the frames Alice signs, a v1 DM she seals to Bob, their safety number, " +
-                "and the link records and advert a peer reads first. KeyedVectorTest checks them. See vectors/README.md."
+                "the link records a peer reads, and the advert it reads first. KeyedVectorTest checks them. See vectors/README.md."
 
         /** The publish stamp of Alice's profile, and the clock the other frames count from. */
         const val PUBLISHED_AT = 1_756_100_000_000L
@@ -305,6 +323,8 @@ class KeyedVectorTest {
         const val PSM = 0x81
         const val DM_SENT_AT = PUBLISHED_AT + 2_000L
         const val ROOM_BODY = "Hello, room"
+        const val FILE_MIME = "image/jpeg"
+        const val FILE_SIZE = 203_807L
         const val DM_BODY = "Hi Bob"
     }
 }

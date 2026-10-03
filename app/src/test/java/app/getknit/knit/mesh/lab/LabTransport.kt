@@ -1,5 +1,6 @@
 package app.getknit.knit.mesh.lab
 
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshTransport
@@ -8,6 +9,7 @@ import app.getknit.knit.mesh.ReceivedDigest
 import app.getknit.knit.mesh.ReceivedFile
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.bluetooth.BleFastRoutePolicy
+import app.getknit.knit.mesh.furthestByKey
 import app.getknit.knit.mesh.link.FrameKey
 import app.getknit.knit.mesh.link.LinkCrossings
 import app.getknit.knit.mesh.protocol.FrameType
@@ -365,10 +367,12 @@ class LabTransport(
     }
 
     /** What every linked sender has parked toward this node: the headers are in, the bytes are not. */
-    override fun arrivingFiles(): Set<String> =
-        pipes.values.flatMapTo(HashSet()) { link ->
-            link.target.pipes[nodeId]?.let { toMe -> synchronized(toMe.heldFiles) { toMe.heldFiles.map { it.key } } } ?: emptyList()
-        }
+    override fun arrivingFiles(): Map<String, ArrivingFile> =
+        pipes.values
+            .flatMap { link ->
+                link.target.pipes[nodeId]?.let { toMe -> synchronized(toMe.heldFiles) { toMe.heldFiles.map { it.key } } } ?: emptyList()
+            }.map { ArrivingFile(it, bytes = 0, total = null) }
+            .furthestByKey()
 
     /** Queued on the link: a file parked toward [nodeId] under [key]. An unheld lab file lands at once. */
     override fun fileInFlightTo(

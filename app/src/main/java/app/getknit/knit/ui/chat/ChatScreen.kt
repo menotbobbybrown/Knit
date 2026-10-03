@@ -212,6 +212,7 @@ import app.getknit.knit.demo.DemoComposeCommand
 import app.getknit.knit.demo.DemoComposer
 import app.getknit.knit.identity.PeerLabel
 import app.getknit.knit.location.GeoUri
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.lora.LoraSizeHint
 import app.getknit.knit.mesh.protocol.LinkPreviewBlob
@@ -297,6 +298,7 @@ fun ChatScreen(
     val showTransferConsent by viewModel.showTransferConsent.collectAsStateWithLifecycle()
     val voiceRecording by viewModel.voiceRecording.collectAsStateWithLifecycle()
     val voicePlayback by viewModel.voicePlayback.collectAsStateWithLifecycle()
+    val arrivals by viewModel.arrivals.collectAsStateWithLifecycle()
     val recentReactions by viewModel.recentReactions.collectAsStateWithLifecycle()
     val inputState = rememberTextFieldState()
     val shareInbox = koinInject<ShareInbox>()
@@ -594,6 +596,7 @@ fun ChatScreen(
         onDismissRelayNotice = viewModel::dismissRelayNotice,
         voiceRecording = voiceRecording,
         voicePlayback = voicePlayback,
+        arrivals = arrivals,
         onStartVoice = { locked -> viewModel.startVoiceRecording(locked) },
         onLockVoice = viewModel::lockVoiceRecording,
         onStopVoice = viewModel::stopVoiceRecordingAndStage,
@@ -732,6 +735,9 @@ internal fun ChatScreenContent(
     // hash against. All defaulted so the previews and the content-level tests need not name them.
     voiceRecording: ChatViewModel.VoiceRecording? = null,
     voicePlayback: VoicePlayer.Playback? = null,
+    // Hash → how far each awaited attachment has got while its bytes stream in (#115). Looked up per row at the
+    // bubble, so a moving ring recomposes its own bubble and no other. Defaulted like the voice state above.
+    arrivals: Map<String, ArrivingFile> = emptyMap(),
     onStartVoice: (locked: Boolean) -> Unit = {},
     onLockVoice: () -> Unit = {},
     onStopVoice: () -> Unit = {},
@@ -1416,6 +1422,7 @@ internal fun ChatScreenContent(
                                         voicePlayback = voicePlayback,
                                         onVoicePlay = onVoicePlay,
                                         onVoiceSeek = onVoiceSeek,
+                                        arrival = row.attachmentHash?.let(arrivals::get),
                                     )
                                 }
                             }
@@ -2085,6 +2092,9 @@ private fun MessageBubble(
     voicePlayback: VoicePlayer.Playback? = null,
     onVoicePlay: (hash: String, key: String?) -> Unit = { _, _ -> },
     onVoiceSeek: (hash: String, positionMs: Int) -> Unit = { _, _ -> },
+    // How far this row's attachment has got while its bytes stream in over a nearby link (#115). Defaulted for
+    // the @Preview call sites and for every row whose attachment is held or not on its way.
+    arrival: ArrivingFile? = null,
 ) {
     val maxBubbleWidth =
         with(LocalDensity.current) {
@@ -2273,6 +2283,7 @@ private fun MessageBubble(
                                         if (total > 0) onVoiceSeek(row.attachmentHash, (fraction * total).toInt())
                                     },
                                     onLongClick = { showPicker = true },
+                                    arrival = arrival,
                                 )
                             } else if (row.attachmentName != null) {
                                 // A named attachment is a file: nothing here decodes, so the bubble names it
@@ -2288,6 +2299,7 @@ private fun MessageBubble(
                                     wait = row.attachmentWait,
                                     hash = row.attachmentHash,
                                     flagged = row.attachmentFlagged,
+                                    arrival = arrival,
                                     onOpen = {
                                         onSaveFile(
                                             row.attachmentHash,
@@ -2321,6 +2333,7 @@ private fun MessageBubble(
                                     row.attachmentReady,
                                     row.attachmentFlagged,
                                     row.attachmentWait,
+                                    arrival = arrival,
                                     imageRatios = imageRatios,
                                     onImageClick = {
                                         onImageClick(
@@ -2935,6 +2948,7 @@ private fun AttachmentImage(
     ready: Boolean,
     flagged: Boolean,
     wait: AttachmentWait,
+    arrival: ArrivingFile?,
     imageRatios: MutableMap<String, Float>,
     onImageClick: (BlobImage) -> Unit,
     onLongClick: () -> Unit,
@@ -3082,15 +3096,15 @@ private fun AttachmentImage(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
                 ) {
-                    WaitingIndicator(key = hash, size = 24.dp)
+                    ArrivalIndicator(key = hash, arrival = arrival, size = 24.dp)
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        stringResource(R.string.chat_loading_photo),
+                        arrival?.let { arrivalText(it) } ?: stringResource(R.string.chat_loading_photo),
                         style = MaterialTheme.typography.labelSmall,
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 12.dp),
                     )
-                    attachmentWaitHint(wait)?.let { hint ->
+                    attachmentWaitHint(wait, arrival)?.let { hint ->
                         Spacer(Modifier.height(4.dp))
                         Text(
                             hint,
@@ -4586,7 +4600,8 @@ private fun StagedFileTile(attachment: AttachmentStore.Ingested) {
 }
 
 // Previews exercise the text/no-attachment branches; attachment-bearing rows render only a loading
-// placeholder in a preview (Coil/BlobImage has no DB-backed bytes), so sample rows leave attachments null.
+// placeholder in a preview (Coil/BlobImage has no DB-backed bytes), so sample rows leave attachments null —
+// all but the arriving photo's, whose placeholder is the point.
 @Preview(showBackground = true)
 @Composable
 fun MessageBubbleTheirsPreview() =
@@ -4725,6 +4740,37 @@ fun MessageBubbleWithMentionPreview() =
             onDelete = {},
             onBlock = {},
             onCopy = {},
+        )
+    }
+
+/** A photo whose bytes are streaming in over a nearby link: the ring and how much has crossed (#115). */
+@Preview(showBackground = true)
+@Composable
+fun MessageBubblePhotoArrivingPreview() =
+    KnitPreview {
+        MessageBubble(
+            row =
+                ChatRow(
+                    id = "m5",
+                    body = "From the summit",
+                    mine = false,
+                    senderName = "Ada Lovelace",
+                    senderNodeId = "node-ada",
+                    avatarHash = null,
+                    sentAt = PREVIEW_NOW - 2 * 60_000L,
+                    received = false,
+                    attachmentHash = "preview",
+                    attachmentMime = "image/jpeg",
+                ),
+            now = PREVIEW_NOW,
+            showSenderName = true,
+            onImageClick = {},
+            onOpenProfile = {},
+            onReact = { _, _ -> },
+            onDelete = {},
+            onBlock = {},
+            onCopy = {},
+            arrival = ArrivingFile("preview", bytes = 84_000, total = 204_028),
         )
     }
 

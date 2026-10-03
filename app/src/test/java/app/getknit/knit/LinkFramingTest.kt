@@ -3,6 +3,8 @@ package app.getknit.knit
 import app.getknit.knit.mesh.link.DigestWire
 import app.getknit.knit.mesh.link.FileHeaderWire
 import app.getknit.knit.mesh.link.LinkFraming
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -121,10 +123,68 @@ class LinkFramingTest {
     }
 
     @Test
+    fun aFileHeaderCarriesTheStreamsSize() {
+        val header = FileHeaderWire(kind = "ATTACHMENT", key = KEY, mime = "image/jpeg", size = 203_807)
+        assertEquals(header, LinkFraming.decodeFileHeader(LinkFraming.encodeFileHeader(header)))
+    }
+
+    @Test
+    fun aHeaderFromABuildBeforeTheSizeDecodesWithNone() {
+        // The bytes a build that predates the field writes (#115): three fields, no size.
+        val older = """{"kind":"ATTACHMENT","key":"$KEY","mime":"image/jpeg"}"""
+        assertEquals(FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = null), LinkFraming.decodeFileHeader(older.encodeToByteArray()))
+    }
+
+    @Test
+    fun aSizeThatWillNotDecodeCostsTheLabelNotTheFile() {
+        // A failed header decode aborts the file behind it, so a size some later sender spells wrong must fall
+        // back to no total rather than to no file.
+        listOf("\"big\"", "1.5", "99999999999999999999", "{}", "[1]", "null").forEach { bad ->
+            val json = """{"kind":"ATTACHMENT","key":"$KEY","mime":"image/jpeg","size":$bad}"""
+            assertEquals(
+                bad,
+                FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = null),
+                LinkFraming.decodeFileHeader(json.encodeToByteArray()),
+            )
+        }
+    }
+
+    @Test
+    fun aHeaderMissingAFieldTheReceiverRoutesOnStillDecodesToNull() {
+        val noMime = """{"kind":"ATTACHMENT","key":"$KEY","size":10}"""
+        assertNull(LinkFraming.decodeFileHeader(noMime.encodeToByteArray()))
+    }
+
+    @Test
+    fun anOlderBuildReadsAHeaderThatCarriesTheSize() {
+        // An older build's decoder: the three fields it knows, under the link's own JSON config, skipping the key
+        // it has never heard of. This is what makes the field additive on a config that encodes defaults.
+        val olderJson =
+            Json {
+                ignoreUnknownKeys = true
+                encodeDefaults = true
+            }
+        val bytes = LinkFraming.encodeFileHeader(FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = 203_807))
+        assertEquals(OlderFileHeader("ATTACHMENT", KEY, "image/jpeg"), olderJson.decodeFromString<OlderFileHeader>(bytes.decodeToString()))
+    }
+
+    /** `FileHeaderWire` as every build before #115 declares it. */
+    @Serializable
+    private data class OlderFileHeader(
+        val kind: String,
+        val key: String,
+        val mime: String,
+    )
+
+    @Test
     fun digestRoundTripsAndGarbageDecodesToNull() {
         val digest = DigestWire(ids = listOf("a1b2c3", "d4e5f6", "g7h8i9"))
         assertEquals(digest, LinkFraming.decodeDigest(LinkFraming.encodeDigest(digest)))
         assertNull(LinkFraming.decodeDigest("not json".encodeToByteArray()))
+    }
+
+    private companion object {
+        val KEY = "ab".repeat(32)
     }
 
     @Test

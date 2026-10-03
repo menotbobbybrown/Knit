@@ -44,6 +44,7 @@
 -keep class app.getknit.knit.mesh.crypto.MessageContent { *; }
 -keep class app.getknit.knit.mesh.crypto.PublicKeyBundle$Proto { *; }
 -keep class app.getknit.knit.mesh.link.FileHeaderWire { *; }
+-keep class app.getknit.knit.mesh.link.FileHeaderCore { *; }
 -keep class app.getknit.knit.mesh.link.DigestWire { *; }
 # At-rest device identity (filesDir/identity.key, CBOR): a key-name drift silently re-mints the nodeId and
 # breaks every peer's pinned key. Not wire, same blast radius — pin it too. StoredPrekey rides the same

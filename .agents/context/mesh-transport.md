@@ -305,9 +305,15 @@ instead of silently dropping the file, and `BlobExchange` keeps a per-(hash, pee
 the re-ask storm around a slow transfer (60 s re-offer, post-link-up `onNeighborAdded`) can't ship a
 second full copy (field-verified: the late-NDP re-ask after a BLE fallback is real, and the memo ate it).
 Since ADR 2026-09.4tx5 (#79) the link itself answers the two questions the memo could not: a receiver
-reads `MeshTransport.arrivingFiles()` (off `FramedLink.rxKey`) and does not ask for a blob whose header is
+reads `MeshTransport.arrivingFiles()` (off `FramedLink.rxFile`) and does not ask for a blob whose header is
 already in, and a holder reads `fileInFlightTo(peer, key)` (the link's pending-file count, from the enqueue
-to the end of the stream) and refuses a re-ask for a copy still queued or streaming to that peer.
+to the end of the stream) and refuses a re-ask for a copy still queued or streaming to that peer. Since ADR
+2026-10.y9qh (#115) that read is a map of each arriving key to the bytes in and the `size` the sender's
+`FILE_HEADER` declared, and the chat samples it (`MeshController.arrivals`, every 500 ms while anything
+streams in, 2 s otherwise, only while an attachment it shows is awaited) to draw a progress ring; the size is
+a label, never a bound. The receiver logs `rx <KIND>/<hash> <size|?>B ← <peer>` at the header and
+`rx … <N>B in <ms>ms ← <peer>` at the end — the end line times the bytes on air, where the sender's `file …`
+line times only its feed (a different verb, so a `file ATTACHMENT/<hash>` grep still counts serves).
 Frames, digests, avatars, and (when no NAN link is already up) sub-128 KiB blobs keep the BLE-first
 route byte-for-byte. Every routing decision logs `file route: <kind>/<key> <N>B → <peer> <choice+why>`
 (tag `CompositeMeshTransport`) and every arm accept/reject logs `bulk arm <peer> …` (tag

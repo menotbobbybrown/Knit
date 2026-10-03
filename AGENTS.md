@@ -339,7 +339,11 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   is pushed to a peer that did not just ask, there is no wanter set — and "is it on the way" is a read of the
   link, never a memo with a TTL: the receiver stays quiet for a hash whose header is in, the holder refuses a
   re-ask for a key still queued or streaming to that peer. The lab pins it with `LabTransport.holdFiles` and
-  the `files` recorder (one copy per (hash, link)).
+  the `files` recorder (one copy per (hash, link)). **Before touching `FramedLink.rxFile`, `ArrivingFile`,
+  `FileHeaderWire.size`, `MeshController.arrivals` / `arrivalTicker`, `ChatViewModel.arrivals` or
+  `ui/chat/ArrivalIndicator`:** READ ADR 2026-10.y9qh — the chat's progress ring is the same read of the link
+  (bytes in, and the size the header declared: a label, never a bound), polled only while an attachment the
+  window shows is awaited, finite on screen, and a `size` that will not decode costs the label, never the file.
 - **When touching a presence dot or an online / offline label** (Profile Details, Diagnostics' node
   sections, the Contacts dot): the four evidence tiers live in `ui/Reach.kt` — `Direct` is
   `MeshController.neighbors` (a short-range radio saw the peer's own radio), `Indirect` is

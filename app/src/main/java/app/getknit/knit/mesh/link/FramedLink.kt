@@ -1,5 +1,6 @@
 package app.getknit.knit.mesh.link
 
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.DropReason
 import app.getknit.knit.mesh.FileKind
 import app.getknit.knit.mesh.FileMeta
@@ -88,21 +89,27 @@ class FramedLink(
         private set
 
     @Volatile
-    var rxInProgress = false
-        private set
-
-    @Volatile
     var txInProgress = false
         private set
 
-    // The key (the content hash) of the file streaming *in* right now — set at its header,
-    // cleared at its end, abort or the link's close, so it is exactly "a FILE_HEADER is in and no FILE_END
-    // yet". `BlobExchange` reads it through `MeshTransport.arrivingFiles` to keep a blob whose bytes are
-    // already on the way from being asked for again (a 60 s re-ask against a slow BLE transfer bought a
-    // second full copy, work item #79). Read only — a torn link clears its own state.
-    @Volatile
-    var rxKey: String? = null
-        private set
+    // The file streaming *in* right now and how far it has got — set at its header, its byte count replaced
+    // after every chunk written, cleared at its end, abort or the link's close, so it is exactly "a FILE_HEADER
+    // is in and no FILE_END yet". `BlobExchange` reads its key through `MeshTransport.arrivingFiles` to keep a
+    // blob whose bytes are already on the way from being asked for again (a 60 s re-ask against a slow BLE
+    // transfer bought a second full copy, work item #79); the chat reads its bytes and declared total to draw
+    // the attachment's progress (#115). One reference, so a reader never pairs one file's key with another's
+    // count. The reader loop writes it, except [close] from the owner's thread, whose null a late chunk update
+    // never undoes ([appendRxFile] updates in place). Read only — a torn link clears its own state.
+    private val rx = AtomicReference<ArrivingFile?>(null)
+
+    /** The file streaming in right now, with the bytes in so far and the total its header declared. */
+    val rxFile: ArrivingFile? get() = rx.get()
+
+    /** The key (the content hash) of the file streaming in right now. */
+    val rxKey: String? get() = rx.get()?.key
+
+    /** True while a file streams in: a transport's supervisor holds the link rather than tear it down mid-transfer. */
+    val rxInProgress: Boolean get() = rx.get() != null
 
     // Files queued behind an in-progress file transfer (only one streams at a time).
     private val stash = ArrayDeque<Outbound.FileSend>()
@@ -120,6 +127,7 @@ class FramedLink(
     private var rxMeta: FileMeta? = null
     private var rxBytes = 0L
     private var rxAborted = false
+    private var rxStartedAt = 0L
 
     /** Starts the read + write loops. Stamps the quiescence window at link-up (a backfill will extend it). */
     fun start() {
@@ -325,7 +333,8 @@ class FramedLink(
         var cfg = PaceConfig() // read before every chunk below; the window rebases onto the first
         val window = PaceWindow(cfg, startedAt)
         try {
-            val header = FileHeaderWire(item.meta.kind.wire, item.meta.key, item.meta.mime)
+            // The stream's length rides the header so the receiver can show how far it has got (#115).
+            val header = FileHeaderWire(item.meta.kind.wire, item.meta.key, item.meta.mime, size = bytes)
             LinkFraming.write(out, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(header))
             item.file.inputStream().use { input ->
                 val buf = ByteArray(LinkFraming.FILE_CHUNK_BYTES)
@@ -411,16 +420,22 @@ class FramedLink(
         val temp = File.createTempFile("link-rx-", ".tmp", cacheDir)
         rxTemp = temp
         rxOut = BufferedOutputStream(temp.outputStream())
-        rxMeta =
+        val meta =
             FileMeta(
                 kind = FileKind.fromWire(header.kind),
                 key = header.key,
                 mime = header.mime,
             )
+        rxMeta = meta
         rxBytes = 0L
         rxAborted = false
-        rxKey = header.key
-        rxInProgress = true
+        rxStartedAt = now()
+        // The declared size is the sender's label, never a bound: one past the ceiling describes a stream this
+        // link aborts anyway, so it is shown as no total at all (#115).
+        rx.set(ArrivingFile(header.key, 0L, header.size?.takeIf { it in 1..MAX_INCOMING_FILE_BYTES }))
+        // The receive side's oracle that the total crossed. `rx`, not `file`: a bare `file <KIND>/<hash>` grep
+        // counts the serves (ADR 2026-09.4tx5's device check), and the key is the peer's until finalize checks it.
+        log("rx ${rxLabel(meta)} ${header.size ?: "?"}B ← $nodeId")
     }
 
     private fun appendRxFile(chunk: ByteArray) {
@@ -432,13 +447,21 @@ class FramedLink(
             abortRx()
             return
         }
-        runCatching { out.write(chunk) }.onFailure { abortRx() }
+        runCatching { out.write(chunk) }
+            // In place, so the null a racing close() wrote stays null.
+            .onSuccess { rx.updateAndGet { it?.copy(bytes = rxBytes) } }
+            .onFailure { abortRx() }
     }
 
     private fun endRxFile() {
         val (temp, meta) = finishRxFile() ?: return
+        // How long the bytes took to cross: the sender's `file …` line times only its feed into the stack (#114).
+        log("rx ${rxLabel(meta)} ${rxBytes}B in ${now() - rxStartedAt}ms ← $nodeId")
         scope.launch(Dispatchers.IO) { finalizeIncomingFile(temp, meta) }
     }
+
+    /** A file's kind and key for a log line, the key only once it reads as a content hash (it is the peer's). */
+    private fun rxLabel(meta: FileMeta): String = "${meta.kind.wire}/${meta.key.takeIf { isValidBlobHash(it) } ?: "<bad key>"}"
 
     /** Finish the active file, returning (temp, meta) to finalize, or null if none/aborted. */
     private fun finishRxFile(): Pair<File, FileMeta>? {
@@ -448,8 +471,7 @@ class FramedLink(
         rxOut = null
         rxTemp = null
         rxMeta = null
-        rxKey = null
-        rxInProgress = false
+        rx.set(null)
         runCatching { out?.close() }
         if (rxAborted || temp == null || meta == null) {
             temp?.delete()
@@ -460,8 +482,7 @@ class FramedLink(
 
     private fun abortRx() {
         rxAborted = true
-        rxKey = null
-        rxInProgress = false
+        rx.set(null)
         runCatching { rxOut?.close() }
         rxOut = null
         rxTemp?.delete()
@@ -469,8 +490,7 @@ class FramedLink(
     }
 
     private fun closeRx() {
-        rxKey = null
-        rxInProgress = false
+        rx.set(null)
         runCatching { rxOut?.close() }
         rxOut = null
         rxTemp?.delete()

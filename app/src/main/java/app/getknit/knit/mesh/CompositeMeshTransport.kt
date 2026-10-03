@@ -278,8 +278,11 @@ class CompositeMeshTransport(
         return armed
     }
 
-    /** The union over every plane: a blob arriving on any link is arriving. */
-    override fun arrivingFiles(): Set<String> = children.flatMapTo(HashSet()) { it.arrivingFiles() }
+    /**
+     * The union over every plane: a blob arriving on any link is arriving, and when two planes stream the same
+     * blob the copy furthest along is the one the chat shows (#115).
+     */
+    override fun arrivingFiles(): Map<String, ArrivingFile> = children.flatMap { it.arrivingFiles().values }.furthestByKey()
 
     /** Any plane: the serve went to whichever child held the link, and a re-ask must see it wherever it sits. */
     override fun fileInFlightTo(

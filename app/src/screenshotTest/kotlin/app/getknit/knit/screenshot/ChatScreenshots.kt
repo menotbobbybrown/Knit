@@ -13,6 +13,7 @@ import app.getknit.knit.ui.chat.EmojiPickerSheetEmptySearchPreview
 import app.getknit.knit.ui.chat.EmojiPickerSheetLoadingPreview
 import app.getknit.knit.ui.chat.EmojiPickerSheetPreview
 import app.getknit.knit.ui.chat.EmptyStatePreview
+import app.getknit.knit.ui.chat.FileAttachmentArrivingPreview
 import app.getknit.knit.ui.chat.LinkPreviewCardHiddenPreview
 import app.getknit.knit.ui.chat.LinkPreviewCardPreview
 import app.getknit.knit.ui.chat.LinkPreviewLoadingRowPreview
@@ -22,6 +23,7 @@ import app.getknit.knit.ui.chat.MessageBubbleEmojiPreview
 import app.getknit.knit.ui.chat.MessageBubbleLinkPreview
 import app.getknit.knit.ui.chat.MessageBubbleMinePreview
 import app.getknit.knit.ui.chat.MessageBubbleMineViaInternetPreview
+import app.getknit.knit.ui.chat.MessageBubblePhotoArrivingPreview
 import app.getknit.knit.ui.chat.MessageBubbleTheirsPreview
 import app.getknit.knit.ui.chat.MessageBubbleTheirsViaInternetPreview
 import app.getknit.knit.ui.chat.MessageBubbleWithMentionPreview
@@ -61,6 +63,11 @@ fun MessageBubbleMineViaInternet() = MessageBubbleMineViaInternetPreview()
 @ComponentShots
 @Composable
 fun MessageBubbleWithMention() = MessageBubbleWithMentionPreview()
+
+@PreviewTest
+@ComponentShots
+@Composable
+fun MessageBubblePhotoArriving() = MessageBubblePhotoArrivingPreview()
 
 @PreviewTest
 @ComponentShots
@@ -142,6 +149,11 @@ fun EmojiPickerSheetLoading() = EmojiPickerSheetLoadingPreview()
 @ComponentShots
 @Composable
 fun EmojiPickerSheetEmptySearch() = EmojiPickerSheetEmptySearchPreview()
+
+@PreviewTest
+@ComponentShots
+@Composable
+fun FileAttachmentArriving() = FileAttachmentArrivingPreview()
 
 @PreviewTest
 @ComponentShots

@@ -311,8 +311,13 @@ class AttachmentLabTest {
             // Bob's own link-up hooks re-ask each new neighbour for every blob he lacks, and custody parity does not
             // wait for them (the other end's digest can settle it). One that runs after the picture's frame lands
             // is a second ask before the header — a legitimate one, and not the re-ask this scenario pins. His
-            // digest to a neighbour is sent after that neighbour's re-ask (`MeshManager.watchNeighbors`).
-            lab.await(1) { if (listOf(alice, carol).all { it.nodeId in bob.transport.digestsSent }) 1 else 0 }
+            // digest to a neighbour is sent after that neighbour's re-ask (`MeshManager.watchNeighbors`). Carol's
+            // hooks too: one stalled past her want for the picture re-asks Bob, and handled after his bytes land
+            // it is a fresh ask he rightly serves — which reads as the push this scenario pins.
+            lab.await(1) {
+                val ran = listOf(bob to listOf(alice, carol), carol to listOf(alice, bob))
+                ran.all { (node, peers) -> peers.all { it.nodeId in node.transport.digestsSent } }.let { if (it) 1 else 0 }
+            }
 
             alice.transport.holdFiles(bob.transport) // Bob's link is the Moto's: the header lands, the bytes take their time
             alice.transport.hold(carol.transport) // Carol hears of the picture from Bob, never from Alice's frame

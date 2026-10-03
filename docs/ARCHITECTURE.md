@@ -177,7 +177,8 @@ Implementations:
 - **Socket framing (`mesh/link/LinkFraming.kt`).** Transport-neutral — the same codec runs over the NAN
   NDP socket and the BLE L2CAP socket. A byte stream is chunked into length-prefixed records
   `[type:1][len:4 big-endian][payload]`: `FRAME` (one CBOR `WireEnvelope` → `inbound`); a file as
-  `FILE_HEADER` (JSON `FileHeaderWire`: kind + key + mime) → `FILE_CHUNK`s → `FILE_END` (→
+  `FILE_HEADER` (JSON `FileHeaderWire`: kind + key + mime + the stream's `size`, a label the receiver's
+  progress ring reads, ADR 2026-10.y9qh) → `FILE_CHUNK`s → `FILE_END` (→
   `incomingFiles`); `DIGEST` (a custody id-list, at most one waiting per link — a newer one takes the
   waiting one's place, ADR 2026-09.tjfb); plus `HELLO`/`KEEPALIVE`. The writer serializes files
   and interleaves live frames *between* chunks so an 8 MiB blob never stalls traffic; a per-file receive
@@ -470,7 +471,8 @@ opaque SHA-256-addressed bytes with a MIME string beside them, which is why voic
   adapted over `AttachmentStore`) implements a hop-by-hop pull:
   - `want(hash)` — returns early if held, already in flight (`fetching` set), or already **arriving**
     on a link (`MeshTransport.arrivingFiles()`: a `FILE_HEADER` in, no `FILE_END` yet — read off
-    `FramedLink.rxKey`, never a memo); otherwise sends a `blobreq` frame (`relay = false`) to **every
+    `FramedLink.rxFile`, never a memo; the same read gives the chat its progress ring, ADR 2026-10.y9qh);
+    otherwise sends a `blobreq` frame (`relay = false`) to **every
     direct neighbor**.
   - `onRequest(hash, fromNodeId)` — if we hold the blob, send it straight back over the file channel
     (`FileKind.ATTACHMENT`), unless a copy is already queued or streaming to that peer

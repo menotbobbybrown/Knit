@@ -68,6 +68,14 @@ interface MeshController {
     /** conversationId → the set of peers currently shown as "typing" there, for the chat UI. */
     val typing: StateFlow<Map<String, Set<String>>>
 
+    /**
+     * The files streaming in on a live link right now, by key, with how far each has got
+     * ([MeshTransport.arrivingFiles], #115) — the chat's attachment progress. A cold poll of the links
+     * ([arrivalTicker]): it reads them only while collected, so a chat collects it only while an attachment it
+     * shows is still on its way. Defaulted for the fakes.
+     */
+    val arrivals: Flow<Map<String, ArrivingFile>> get() = flowOf(emptyMap())
+
     /** Starts the mesh engine (called by the foreground [MeshService]). */
     fun start()
 

@@ -43,6 +43,7 @@ import app.getknit.knit.location.GeoPoint
 import app.getknit.knit.location.LocationFix
 import app.getknit.knit.location.LocationFixPolicy
 import app.getknit.knit.location.LocationPrecision
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.FakeMeshController
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.PublicPostOutcome
@@ -1317,6 +1318,43 @@ class ChatViewModelTest {
             // The composer's staged attachment rides the same subscription as the rows: one read, not two.
             verify { blobs.observeSizes(setOf("h1", "staged")) }
             verify(exactly = 0) { blobs.observeSizes(match { "h1" !in it && it.isNotEmpty() }) }
+        }
+
+    @Test
+    fun arrivalsAreReadForTheWindowsAwaitedAttachmentsOnly() =
+        runTest {
+            // The progress ring's source (#115): the links are polled only while an attachment the window shows is
+            // still on its way, and only those attachments' arrivals come back — not a held one's, not a link
+            // card's (a card never draws progress), not one outside the window.
+            val vm = vm()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.arrivals.collect {} }
+            advanceUntilIdle()
+            assertEquals("nothing awaited: the links are not polled", 0, mesh.arrivals.subscriptionCount.value)
+
+            val photo = ArrivingFile("h1", 84_000, 204_000)
+            mesh.arrivals.value =
+                mapOf(
+                    "h1" to photo,
+                    "held" to ArrivingFile("held", 1, 2),
+                    "card" to ArrivingFile("card", 3, 4),
+                    "elsewhere" to ArrivingFile("elsewhere", 5, 6),
+                )
+            messagesFlow.value =
+                listOf(
+                    msg(senderId = "bob", id = "m1", conversationId = Conversations.NEARBY, attachmentHash = "h1"),
+                    msg(senderId = "bob", id = "m2", conversationId = Conversations.NEARBY, attachmentHash = "held"),
+                    msg(senderId = "bob", id = "m3", conversationId = Conversations.NEARBY)
+                        .copy(attachmentHash = "card", attachmentMime = LinkPreviewBlob.MIME),
+                )
+            sizesFlow.value = mapOf("held" to 2)
+            advanceUntilIdle()
+            assertEquals("one poll, for the one awaited", 1, mesh.arrivals.subscriptionCount.value)
+            assertEquals(mapOf("h1" to photo), vm.arrivals.value)
+
+            sizesFlow.value = mapOf("held" to 2, "h1" to 204_000)
+            advanceUntilIdle()
+            assertEquals("landed: nothing left to show", emptyMap<String, ArrivingFile>(), vm.arrivals.value)
+            assertEquals("and the poll stops", 0, mesh.arrivals.subscriptionCount.value)
         }
 
     @Test

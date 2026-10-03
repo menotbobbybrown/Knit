@@ -35,10 +35,13 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import app.getknit.knit.R
 import app.getknit.knit.data.FileTypes
 import app.getknit.knit.data.relay.AttachmentWait
+import app.getknit.knit.mesh.ArrivingFile
+import app.getknit.knit.ui.preview.KnitPreview
 
 /**
  * The bubble for an arbitrary-file attachment (ADR 2026-09.qq2r): a type icon, the sender's own filename,
@@ -69,19 +72,25 @@ fun FileAttachmentBubble(
     wait: AttachmentWait = AttachmentWait.Nearby,
     // The blob's hash, which keys the placeholder's spinner-to-hourglass settle.
     hash: String? = null,
+    // How far the bytes have got while they stream in over a nearby link (#115); null while none is carrying them.
+    arrival: ArrivingFile? = null,
 ) {
     val context = LocalContext.current
     val label = name ?: stringResource(R.string.chat_file_unnamed)
     // Bytes we hold beat the size the sender declared, the moment we hold any: one is measured, the other is
     // a claim. Before the blob lands the claim is all there is, which is what it is carried for.
     val sizeBytes = heldBytes?.toLong() ?: declaredSize
+    val arriving = if (ready) null else arrival
     val warning = if (flagged) stringResource(R.string.chat_file_flagged) else null
-    val waiting = if (ready) null else attachmentWaitHint(wait)
+    val waiting = if (ready) null else attachmentWaitHint(wait, arriving)
+    // While the bytes stream in, how far they have got leads the line: "84 kB of 204 kB" already says the size,
+    // so the claim steps aside; "84 kB received" (a sender that declared no total on the link) keeps it beside.
     val detail =
         listOfNotNull(
-            sizeBytes?.let { Formatter.formatShortFileSize(context, it) },
+            arriving?.let { arrivalText(it) },
+            sizeBytes?.takeUnless { arriving?.fraction != null }?.let { Formatter.formatShortFileSize(context, it) },
             FileTypes.extensionOf(name).uppercase().ifEmpty { null },
-            if (ready) null else stringResource(R.string.chat_file_loading),
+            if (ready || arriving != null) null else stringResource(R.string.chat_file_loading),
         ).joinToString(SEPARATOR)
 
     // The card paints its own container, so it has to carry the matching content colour too. Without
@@ -120,7 +129,7 @@ fun FileAttachmentBubble(
                         contentDescription = null,
                     )
                 } else {
-                    WaitingIndicator(key = hash, size = 20.dp)
+                    ArrivalIndicator(key = hash, arrival = arriving, size = 20.dp)
                 }
             }
             Column(
@@ -195,3 +204,21 @@ private val ICON_SLOT = 36.dp
 private val SHEET_EXTENSIONS = setOf("csv", "tsv", "xls", "xlsx", "ods", "numbers")
 private val ARCHIVE_EXTENSIONS = setOf("zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz")
 private val DOCUMENT_EXTENSIONS = setOf("doc", "docx", "odt", "rtf", "md", "txt", "epub", "pages")
+
+/** A file whose bytes are streaming in over a nearby link: the ring, and how far it has got where the size was (#115). */
+@Preview(showBackground = true)
+@Composable
+fun FileAttachmentArrivingPreview() =
+    KnitPreview {
+        FileAttachmentBubble(
+            name = "Field notes.pdf",
+            mime = "application/pdf",
+            declaredSize = 204_000,
+            heldBytes = null,
+            ready = false,
+            flagged = false,
+            onOpen = {},
+            onLongClick = {},
+            arrival = ArrivingFile("preview", bytes = 84_000, total = 204_028),
+        )
+    }

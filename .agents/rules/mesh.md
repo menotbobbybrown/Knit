@@ -202,7 +202,9 @@ free). Two invariants that are easy to break:
   in, no `FILE_END` yet, off `FramedLink.rxKey`) keeps `want` and the tick's re-ask quiet for that hash,
   and `fileInFlightTo(peer, key)` (queued or streaming, counted from the enqueue) refuses a second copy on
   a re-ask whatever the 45 s memo says. A transfer's length is the receiver's controller's, so no constant
-  covers it. Don't add a `noteIncoming` memo or a wanter TTL back.
+  covers it. Don't add a `noteIncoming` memo or a wanter TTL back. The progress ring the chat draws is the
+  same read (`arrivingFiles()` maps each key to the bytes in and the header's declared `size`, ADR
+  2026-10.y9qh): that size is the sender's label, never a bound or a stall timer.
 - **The database says which attachments are missing; `BlobExchange`'s `fetching` set is a swept memo of it**
   (ADR 2026-09.ptv8). A `want` parked with no neighbor (a frame heard over the board alone) is reclaimed by
   the 30-min `FETCH_TTL_MS` sweep, and `onNeighborAdded` re-asks only from the memo — so

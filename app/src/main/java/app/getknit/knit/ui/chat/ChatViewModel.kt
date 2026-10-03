@@ -63,6 +63,7 @@ import app.getknit.knit.location.LocationFix
 import app.getknit.knit.location.LocationFixPolicy
 import app.getknit.knit.location.LocationPrecision
 import app.getknit.knit.location.LocationSource
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.MeshController
 import app.getknit.knit.mesh.PublicPostOutcome
 import app.getknit.knit.mesh.PublicPostRefusal
@@ -644,6 +645,29 @@ class ChatViewModel(
         heldHashes
             .flatMapLatest { blobs.observeSizes(it) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // The window's attachments still on their way: shown, not held, and not a link card (a card never draws
+    // progress). Read off the one shared [heldSizes] — never a second blob query (ADR 2026-09.fjcw) — and only
+    // once it has answered, so a thread does not count every attachment as missing for its first frame.
+    private val awaitedHashes: Flow<Set<String>> =
+        combine(windowed.filterNotNull(), heldSizes.filterNotNull()) { window, held ->
+            window.messages
+                .filter { it.attachmentMime != LinkPreviewBlob.MIME }
+                .mapNotNullTo(HashSet()) { m -> m.attachmentHash?.takeUnless { it in held } }
+        }.distinctUntilChanged()
+
+    /**
+     * Hash → how far each awaited attachment in the window has got, for the bubbles' progress ring (#115). Polls
+     * the links ([MeshController.arrivals]) only while something in the window is awaited: a settled thread holds
+     * no subscription at all. A side value like [voicePlayback], out of [state] on purpose — a ring moving twice a
+     * second must not rebuild every row.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val arrivals: StateFlow<Map<String, ArrivingFile>> =
+        awaitedHashes
+            .flatMapLatest { wanted ->
+                if (wanted.isEmpty()) flowOf(emptyMap()) else meshManager.arrivals.map { all -> all.filterKeys(wanted::contains) }
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     // Held blob sizes + moderation-flagged hashes plus the content-filtering setting, and the decoded
     // link-preview cards, combined upstream so the main bundle stays at the typed 5-flow combine overload.

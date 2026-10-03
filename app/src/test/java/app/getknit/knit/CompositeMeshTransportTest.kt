@@ -1,5 +1,6 @@
 package app.getknit.knit
 
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.CompositeMeshTransport
 import app.getknit.knit.mesh.FanoutHint
 import app.getknit.knit.mesh.FileKind
@@ -121,6 +122,11 @@ class CompositeMeshTransportTest {
             return armBulk
         }
 
+        /** What this plane's links report streaming in. */
+        var arriving: Map<String, ArrivingFile> = emptyMap()
+
+        override fun arrivingFiles(): Map<String, ArrivingFile> = arriving
+
         override suspend fun send(
             wire: WireEnvelope,
             to: Peer?,
@@ -193,6 +199,22 @@ class CompositeMeshTransportTest {
     }
 
     private fun wire() = WireEnvelope(sig = ByteArray(0), signed = ByteArray(0))
+
+    @Test
+    fun arrivingFilesIsTheUnionAndTheCopyFurthestAlongCounts() =
+        runTest(UnconfinedTestDispatcher()) {
+            // A blob arriving on any plane is arriving (what BlobExchange reads); when two planes stream the same
+            // one, the chat's ring follows the copy furthest along (#115).
+            val bt = FakeChild()
+            val nan = FakeChild(hasFastPlane = true)
+            val composite = CompositeMeshTransport(listOf(bt, nan), backgroundScope)
+            bt.arriving = mapOf("a" to ArrivingFile("a", 10, 100), "b" to ArrivingFile("b", 5, null))
+            nan.arriving = mapOf("a" to ArrivingFile("a", 70, 100), "c" to ArrivingFile("c", 1, 9))
+            assertEquals(
+                mapOf("a" to ArrivingFile("a", 70, 100), "b" to ArrivingFile("b", 5, null), "c" to ArrivingFile("c", 1, 9)),
+                composite.arrivingFiles(),
+            )
+        }
 
     @Test
     fun pauseAndResumeReachEveryChild() =

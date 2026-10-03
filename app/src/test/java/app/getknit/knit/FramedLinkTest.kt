@@ -1,5 +1,6 @@
 package app.getknit.knit
 
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.FileKind
 import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
@@ -217,6 +218,82 @@ class FramedLinkTest {
     }
 
     @Test
+    fun rxFileCountsTheBytesInAgainstTheDeclaredTotal() {
+        // What the chat's progress ring reads (#115): the bytes written so far against the size the header
+        // declared, from the header to the FILE_END — the same span rxKey names.
+        val h = harness()
+        val key = "c".repeat(64)
+        assertNull(h.link.rxFile)
+        writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = 3000)))
+        assertTrue("the header opens it at nothing in", awaitUntil { h.link.rxFile == ArrivingFile(key, 0, 3000) })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, ByteArray(1200))
+        assertTrue("partway", awaitUntil { h.link.rxFile == ArrivingFile(key, 1200, 3000) })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, ByteArray(1800))
+        assertTrue("every byte in is still arriving until the end", awaitUntil { h.link.rxFile == ArrivingFile(key, 3000, 3000) })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_END)
+        assertNotNull(h.callbacks.files.poll(2, TimeUnit.SECONDS))
+        assertNull("gone at the end", h.link.rxFile)
+    }
+
+    @Test
+    fun aHeaderWithoutAUsableSizeArrivesWithNoTotal() {
+        // An older sender declares nothing, and a size of nothing, below it, or past the stream's ceiling is no
+        // total either: the count alone is what the bubble shows (#115).
+        listOf(null, 0L, -5L, 9L * 1024 * 1024).forEachIndexed { i, declared ->
+            val h = harness()
+            val key = "${i + 1}".repeat(64)
+            writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = declared)))
+            writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, ByteArray(10))
+            assertTrue("declared $declared", awaitUntil { h.link.rxFile == ArrivingFile(key, 10, null) })
+        }
+    }
+
+    @Test
+    fun aSecondHeaderReplacesTheFileArrivingAndAnUndecodableOneLeavesNone() {
+        // A header with no FILE_END before it drops the partial file it interrupts, count and all.
+        val h = harness()
+        val first = "a".repeat(64)
+        val second = "b".repeat(64)
+        writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", first, size = 500)))
+        writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, ByteArray(100))
+        assertTrue(awaitUntil { h.link.rxFile == ArrivingFile(first, 100, 500) })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", second, size = 700)))
+        assertTrue("the new header's file, from nothing", awaitUntil { h.link.rxFile == ArrivingFile(second, 0, 700) })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, "not json".encodeToByteArray())
+        assertTrue("a header that will not decode leaves nothing arriving", awaitUntil { h.link.rxFile == null })
+        assertFalse(h.link.rxInProgress)
+    }
+
+    @Test
+    fun aFilePastTheCeilingStopsArrivingAndLeavesNothingBehind() {
+        // The receive ceiling (8 MiB plus the seal's headroom): sixteen full records stay under it and the
+        // seventeenth crosses it, so the file is aborted — its entry goes, and no temp file or onFile outlives it.
+        val h = harness()
+        val key = "9".repeat(64)
+        val chunk = ByteArray(LinkFraming.MAX_PAYLOAD_BYTES)
+        writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = 4096)))
+        repeat(16) { writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, chunk) }
+        assertTrue("under the ceiling it is arriving", awaitUntil { h.link.rxFile?.bytes == 16L * LinkFraming.MAX_PAYLOAD_BYTES })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, chunk)
+        assertTrue("past it, nothing is", awaitUntil { h.link.rxFile == null })
+        writeRecord(h.toLink, LinkFraming.Type.FILE_END)
+        assertNull("an aborted file never finalizes", h.callbacks.files.poll(1, TimeUnit.SECONDS))
+        assertTrue("no partial file is left in the cache", tmp.root.listFiles()!!.none { it.name.startsWith("link-rx-") })
+    }
+
+    @Test
+    fun rxFileClearsWhenTheLinkClosesMidStream() {
+        val h = harness()
+        val key = "e".repeat(64)
+        writeRecord(h.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = 1000)))
+        writeRecord(h.toLink, LinkFraming.Type.FILE_CHUNK, ByteArray(400))
+        assertTrue(awaitUntil { h.link.rxFile == ArrivingFile(key, 400, 1000) })
+        h.link.close()
+        assertNull("nothing is arriving on a closed link", h.link.rxFile)
+        assertFalse(h.link.rxInProgress)
+    }
+
+    @Test
     fun aPendingFileIsKnownFromEnqueueToTheEndOfItsStream() {
         // What MeshTransport.fileInFlightTo reads: the enqueue side's view of a file queued on, or streaming
         // over, the link — so a re-ask never queues a second copy behind the first (#79). A small out-pipe
@@ -280,6 +357,8 @@ class FramedLinkTest {
         assertEquals(key, LinkFraming.decodeFileHeader(header.payload)!!.key)
         // The producer writes the frozen wire token (FileKind.wire), not the obfuscatable constant name.
         assertEquals("ATTACHMENT", LinkFraming.decodeFileHeader(header.payload)!!.kind)
+        // And the stream's length, so the receiver can show how far it has got (#115).
+        assertEquals(body.size.toLong(), LinkFraming.decodeFileHeader(header.payload)!!.size)
         // Collect chunks until FILE_END and assert they reassemble to the original bytes.
         val received = ArrayList<Byte>()
         var rec = LinkFraming.read(h.fromLink)
@@ -500,6 +579,7 @@ class FramedLinkTest {
     private fun hdr(
         kind: String,
         key: String,
+        size: Long? = null,
     ) = app.getknit.knit.mesh.link
-        .FileHeaderWire(kind = kind, key = key, mime = "image/jpeg")
+        .FileHeaderWire(kind = kind, key = key, mime = "image/jpeg", size = size)
 }

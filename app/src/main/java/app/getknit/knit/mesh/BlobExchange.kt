@@ -18,7 +18,7 @@ import app.getknit.knit.mesh.protocol.WireEnvelope
  * that still lacks the bytes from one whose copy is already on the way from somebody else — a clique
  * that pushed bought every recipient a copy per neighbor (work item #79, ADR 2026-09.4tx5).
  *
- * A blob whose bytes are already streaming in on a link ([MeshTransport.arrivingFiles]) is neither
+ * A blob whose bytes are already streaming in on a link (a key of [MeshTransport.arrivingFiles]) is neither
  * wanted nor re-asked for; a re-ask for one already queued toward that peer ([MeshTransport.fileInFlightTo])
  * ships nothing. Both are reads of the link, not memos here — a torn link clears its own state.
  *

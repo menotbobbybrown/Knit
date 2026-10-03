@@ -593,6 +593,9 @@ class MeshManager(
     /** conversationId → the set of peers currently shown as "typing" there, for the chat UI. Ephemeral (TTL'd). */
     override val typing: StateFlow<Map<String, Set<String>>> get() = typingTracker.typing
 
+    /** The links' incoming files and how far each has got, sampled while a chat waits on one (#115). */
+    override val arrivals: Flow<Map<String, ArrivingFile>> = arrivalTicker(transport::arrivingFiles)
+
     // Demo-screenshot only (DemoSeeder.seedRelays): a pinned spool status that [spoolStatus] answers with
     // instead of the live one. Null in every build that is not `-PseedDemo=true`.
     @Volatile

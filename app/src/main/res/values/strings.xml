@@ -194,6 +194,12 @@
     -->
     <string name="chat_attachment_wait_relay">Can also arrive over the Internet through your relays</string>
     <string name="chat_attachment_wait_frames_only">Your connected relays carry messages only</string>
+    <!--
+      In place of a missing attachment's first line while its bytes stream in over a nearby link (#115): how much
+      has crossed, against the size the sender's phone declared. The bytes alone when it declared none.
+    -->
+    <string name="chat_attachment_arriving">%1$s of %2$s</string>
+    <string name="chat_attachment_arriving_bytes">%1$s received</string>
     <!-- Link previews: the card a sender's phone fetched for a link and sent with the message -->
     <string name="chat_link_card_desc">Link preview: %1$s, %2$s</string>
     <string name="chat_open_link">Open link</string>

@@ -37,6 +37,7 @@ import app.getknit.knit.data.settings.NanAttachJournal
 import app.getknit.knit.data.settings.NanInitiatorJournal
 import app.getknit.knit.data.settings.NanInitiatorLatch
 import app.getknit.knit.identity.Identity
+import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.DigestTracker
 import app.getknit.knit.mesh.FastPathDrop
 import app.getknit.knit.mesh.FileMeta
@@ -51,6 +52,7 @@ import app.getknit.knit.mesh.StoreDigest
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.TransportKind
 import app.getknit.knit.mesh.canReclaimForegroundService
+import app.getknit.knit.mesh.furthestByKey
 import app.getknit.knit.mesh.link.FastFrameCodec
 import app.getknit.knit.mesh.link.FastFramePick
 import app.getknit.knit.mesh.link.FragReassembler
@@ -1135,7 +1137,7 @@ class WifiAwareTransport(
         return accepted
     }
 
-    override fun arrivingFiles(): Set<String> = peers.values.mapNotNullTo(HashSet()) { it.link.rxKey }
+    override fun arrivingFiles(): Map<String, ArrivingFile> = peers.values.mapNotNull { it.link.rxFile }.furthestByKey()
 
     override fun fileInFlightTo(
         nodeId: String,
