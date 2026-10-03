@@ -2432,7 +2432,7 @@ class InboundPipeline(
         }
         waiting.forEach { row ->
             val replaced =
-                db.withWriteTransaction<String?> {
+                db.withWriteTransaction {
                     val group = groups.find(row.groupId) ?: return@withWriteTransaction null
                     if (group.left || group.photoHash != hash || group.photoShownHash == hash) return@withWriteTransaction null
                     groups.upsert(group.copy(photoShownHash = hash))
@@ -3065,7 +3065,7 @@ class InboundPipeline(
         // another collector and copy the same row, so without it either write can put back the row the other
         // one read — reverting this profile, or the pushed avatar that landed while we checked for its blob.
         val stored =
-            db.withWriteTransaction<StoredProfile> {
+            db.withWriteTransaction {
                 storeProfileRow(env.senderId, content, pubKey, version, prekey)
             }
         val applied =
@@ -3355,7 +3355,7 @@ class InboundPipeline(
         hash: String,
         createRow: Boolean,
     ): String? =
-        db.withWriteTransaction<String?> {
+        db.withWriteTransaction {
             val peer = peers.find(nodeId) ?: if (createRow) PeerEntity(nodeId) else return@withWriteTransaction null
             if (peer.avatarHash == hash) return@withWriteTransaction null
             peers.upsert(peer.copy(avatarHash = hash))

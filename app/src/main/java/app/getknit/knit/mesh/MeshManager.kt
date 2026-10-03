@@ -940,7 +940,7 @@ class MeshManager(
     private suspend fun wipedPeers(me: String): Set<String> =
         buildSet {
             messages.distinctConversations().filterTo(this) { Conversations.kindFor(it) == ConversationKind.DM }
-            for (group in groups.active()) addAll(GroupMembersStore.decode(group.members))
+            groups.active().flatMapTo(this) { GroupMembersStore.decode(it.members) }
             remove(me)
         }
 

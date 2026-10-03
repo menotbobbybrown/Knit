@@ -870,10 +870,7 @@ internal class LoraMeshTransport(
     private fun boundSlotIsKnit(
         channels: List<ChannelInfo>,
         index: Int,
-    ): Boolean {
-        if (channels.isEmpty()) return true
-        return channels.any { it.index == index && it.name == KnitChannel.NAME }
-    }
+    ): Boolean = channels.isEmpty() || channels.any { it.index == index && it.name == KnitChannel.NAME }
 
     /**
      * Whether a DM-form frame is addressed to us, or to a peer a higher-preference plane holds a **live link**

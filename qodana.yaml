@@ -156,6 +156,10 @@ exclude:
       - build
       - app/build
       - baselineprofile/build
+      # The Wear OS prototype is a module only under `-Pknit.wear=true` (settings.gradle.kts), which the
+      # sync here does not pass. Its sources are then plain files: every manifest class and every
+      # splash-screen attribute reads as unresolved — 13 findings, zero real.
+      - wear
       # Vendored agent skills, mirrored under .claude/ as symlinks: upstream's files, not ours.
       - .agents/skills
       - .claude/skills

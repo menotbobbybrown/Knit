@@ -1904,13 +1904,6 @@ class BluetoothMeshTransport(
 
     private fun localNodeIdOrEmpty(): String = if (::localNodeId.isInitialized) localNodeId else ""
 
-    /** The peer's advert (protoVersion/capabilities) from the latest presence snapshot, for a link we initiate. */
-    private fun presenceAdvert(nodeId: String): Protocol.PeerWire? =
-        presence
-            .snapshots(elapsed())
-            .firstOrNull { it.nodeId == nodeId }
-            ?.let { Protocol.PeerWire(it.nodeId, it.protoVersion, it.capabilities) }
-
     // --- Diagnostics ---
 
     private suspend fun diagLoop() {
@@ -2004,7 +1997,7 @@ class BluetoothMeshTransport(
         // A Coded start the stack failed internally (ADVERTISE_FAILED_INTERNAL_ERROR) is retried this many times per
         // bring-up, on [codedKeeper]'s doubling wait; [CODED_RETRYING] marks a retry in flight, so its failure is quiet.
         private const val MAX_CODED_START_RETRIES = 5
-        private val CODED_DARK_INTERNAL = "dark ${AdvertisingSetCallback.ADVERTISE_FAILED_INTERNAL_ERROR}"
+        private const val CODED_DARK_INTERNAL = "dark ${AdvertisingSetCallback.ADVERTISE_FAILED_INTERNAL_ERROR}"
         private const val CODED_RETRYING = "retrying"
 
         // Bound the responder's HELLO read (BluetoothSocket has no soTimeout) — close the socket if it stalls.

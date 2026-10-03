@@ -990,7 +990,7 @@ private fun BleLinkCapRow(
             Icon(Icons.Filled.Remove, contentDescription = stringResource(R.string.diagnostics_ble_link_cap_decrease))
         }
         Text(
-            text = if (cap == null) stringResource(R.string.diagnostics_ble_link_cap_default, max) else cap.toString(),
+            text = cap?.toString() ?: stringResource(R.string.diagnostics_ble_link_cap_default, max),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.testTag("ble_link_cap_value"),
         )
