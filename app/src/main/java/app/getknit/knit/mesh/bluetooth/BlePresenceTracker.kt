@@ -15,6 +15,11 @@ import app.getknit.knit.mesh.Peer
  * Coded hits are far sparser than 1M ones (a 1 s advert, a scan that shares its window), so a Coded sighting that
  * follows a Coded sighting is continuous presence across [PresenceConfig.codedGapResetMs], not the 1M gap.
  *
+ * Whether a peer is heard on Coded alone ([Snapshot.codedLagMs]) is measured on a clock that runs only while a scan
+ * window listens on 1M ([onOneMListening]): a Coded-only window cannot hear a 1M advert, so its hits are no evidence
+ * that the peer has none. The clock's reading at each peer's last 1M hit outlives its presence entry (a screen-off
+ * scan is 8 s windows two minutes apart, so presence restarts every window).
+ *
  * Pure of Android and driven by an injected clock (all methods take `now`), so it is JVM-unit-testable with a
  * virtual clock ([app.getknit.knit.BlePresenceTrackerTest]) exactly like the other pure mesh components.
  */
@@ -51,6 +56,12 @@ class BlePresenceTracker(
         /** Each PHY's own smoothed advert RSSI, on its own scale (no credit) — for the trial's readouts. */
         val rssi1m: Double? = null,
         val rssiCoded: Double? = null,
+        /**
+         * How long a scan listened on 1M between the peer's last 1M hit and its latest Coded hit, null when this
+         * presence holds no Coded hit; [CodedPhyPolicy.codedOnly] reads it. A peer never heard on 1M is measured from
+         * its first Coded hit, so it counts only once a 1M listener has missed it for a while.
+         */
+        val codedLagMs: Long? = null,
     )
 
     private class Entry(
@@ -64,6 +75,8 @@ class BlePresenceTracker(
         var last1mAt: Long? = null,
         var rssiCoded: Double? = null,
         var lastCodedAt: Long? = null,
+        // The 1M-listening clock at the latest Coded hit.
+        var lastCodedClock: Long? = null,
     ) {
         /**
          * The smoothed RSSI on the 1M scale, counting a PHY only if it was heard in the latest burst (within that
@@ -114,6 +127,47 @@ class BlePresenceTracker(
 
     private val entries = HashMap<String, Entry>()
 
+    // The 1M-listening clock: banked time, plus the open window's since it began.
+    private var oneMListenedMs = 0L
+    private var oneMListenSince: Long? = null
+
+    // The clock at each peer's last 1M hit, or at its first Coded hit if it has never been heard on 1M. Kept past the
+    // presence entry, least recently used out first.
+    private val oneMMarks =
+        object : LinkedHashMap<String, Long>(MARKS_CAPACITY, MARKS_LOAD_FACTOR, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?) = size > MAX_MARKS
+        }
+
+    private fun oneMClock(now: Long): Long = oneMListenedMs + (oneMListenSince?.let { now - it } ?: 0)
+
+    /** A scan window that hears 1M began ([listening]) or ended; a Coded-only window is not one. */
+    @Synchronized
+    fun onOneMListening(
+        listening: Boolean,
+        now: Long,
+    ) {
+        val since = oneMListenSince
+        if (listening && since == null) oneMListenSince = now
+        if (!listening && since != null) {
+            oneMListenedMs += now - since
+            oneMListenSince = null
+        }
+    }
+
+    private fun noteClock(
+        s: Sighting,
+        entry: Entry,
+        now: Long,
+    ) {
+        val clock = oneMClock(now)
+        if (s.coded) {
+            entry.lastCodedClock = clock
+            oneMMarks.getOrPut(s.nodeId) { clock }
+        } else {
+            oneMMarks[s.nodeId] = clock
+        }
+    }
+
     @Synchronized
     fun onSighting(
         s: Sighting,
@@ -132,10 +186,14 @@ class BlePresenceTracker(
                     digestCue = s.digestCue,
                     firstSeenAt = now,
                     lastSeenAt = now,
-                ).also { it.note(s.rssiDbm, s.coded, now, config.rssiEwmaAlpha, phyGapMs) }
+                ).also {
+                    it.note(s.rssiDbm, s.coded, now, config.rssiEwmaAlpha, phyGapMs)
+                    noteClock(s, it, now)
+                }
             return
         }
         existing.note(s.rssiDbm, s.coded, now, config.rssiEwmaAlpha, phyGapMs)
+        noteClock(s, existing, now)
         existing.protoVersion = s.protoVersion
         existing.capabilities = s.capabilities
         existing.psm = s.psm
@@ -160,6 +218,7 @@ class BlePresenceTracker(
                 codedSeenAgoMs = e.lastCodedAt?.let { now - it },
                 rssi1m = e.rssi1m,
                 rssiCoded = e.rssiCoded,
+                codedLagMs = e.lastCodedClock?.let { coded -> maxOf(0L, coded - (oneMMarks[nodeId] ?: coded)) },
             )
         }
     }
@@ -179,11 +238,22 @@ class BlePresenceTracker(
     @Synchronized
     fun forget(nodeId: String) {
         entries.remove(nodeId)
+        oneMMarks.remove(nodeId)
     }
 
     @Synchronized
     fun clear() {
         entries.clear()
+        oneMMarks.clear()
+        oneMListenedMs = 0
+        oneMListenSince = null
+    }
+
+    private companion object {
+        // Peers whose last 1M hit is remembered past their presence; GattPayloads keeps as many addresses.
+        const val MAX_MARKS = 64
+        const val MARKS_CAPACITY = 16
+        const val MARKS_LOAD_FACTOR = 0.75f
     }
 }
 

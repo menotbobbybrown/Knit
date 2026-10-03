@@ -41,6 +41,7 @@ import app.getknit.knit.mesh.link.LinkCrossings
 import app.getknit.knit.mesh.link.LinkHandshake
 import app.getknit.knit.mesh.power.ElapsedWait
 import app.getknit.knit.mesh.power.PowerPolicy
+import app.getknit.knit.mesh.power.PowerState
 import app.getknit.knit.mesh.power.PowerStateSource
 import app.getknit.knit.mesh.protocol.Protocol
 import app.getknit.knit.mesh.protocol.RelayEnvelope
@@ -951,7 +952,15 @@ class BluetoothMeshTransport(
             links = phyControls.values.map(BlePhyControl::status),
             peers =
                 presence.snapshots(now).map {
-                    PhyPeerStatus(it.nodeId, it.smoothedRssi, it.oneMSeenAgoMs, it.codedSeenAgoMs, it.rssi1m, it.rssiCoded)
+                    PhyPeerStatus(
+                        it.nodeId,
+                        it.smoothedRssi,
+                        it.oneMSeenAgoMs,
+                        it.codedSeenAgoMs,
+                        it.rssi1m,
+                        it.rssiCoded,
+                        it.codedLagMs,
+                    )
                 },
         )
     }
@@ -975,15 +984,7 @@ class BluetoothMeshTransport(
                 continue
             }
             val power = powerState.state.value
-            val duty = PowerPolicy.dutyCycle(power)
-            val phys = nextScanPhys()
-            scanner.phys = phys
-            scanner.start(if (power.interactive || power.charging) ScanSettings.SCAN_MODE_BALANCED else ScanSettings.SCAN_MODE_LOW_POWER)
-            val windowStart = elapsed()
-            val scanned = scanner.isScanning
-            elapsedWait.sleep(duty.scanWindowMs)
-            scanner.stop()
-            if (scanned) noteQuietScan(phys, elapsed() - windowStart)
+            scanWindow(power)
             val aloneFor = aloneForMs()
             val idle =
                 if (floorScan()) {
@@ -1001,6 +1002,24 @@ class BluetoothMeshTransport(
         }
     }
 
+    /** One presence scan window, on the PHYs [nextScanPhys] picks, for the window [power] gives. */
+    private suspend fun scanWindow(power: PowerState) {
+        val phys = nextScanPhys()
+        scanner.phys = phys
+        scanner.start(if (power.interactive || power.charging) ScanSettings.SCAN_MODE_BALANCED else ScanSettings.SCAN_MODE_LOW_POWER)
+        val windowStart = elapsed()
+        val scanned = scanner.isScanning
+        // The clock codedOnly is measured on runs only while 1M is heard (ADR 2026-10.yvn6).
+        presence.onOneMListening(scanned && phys != ScanPhys.CODED, windowStart)
+        try {
+            elapsedWait.sleep(PowerPolicy.dutyCycle(power).scanWindowMs)
+        } finally {
+            presence.onOneMListening(false, elapsed())
+        }
+        scanner.stop()
+        if (scanned) noteQuietScan(phys, elapsed() - windowStart)
+    }
+
     /**
      * The next presence window's PHYs ([CodedPhyPolicy.scanPhys]): every other one Coded-only while this phone has no
      * link or an unlinked peer is heard on Coded alone. Logs one line per edge of those windows.
@@ -1011,7 +1030,7 @@ class BluetoothMeshTransport(
             if (on) {
                 presence
                     .snapshots(elapsed())
-                    .filter { it.nodeId !in links.keys && CodedPhyPolicy.codedOnly(it.oneMSeenAgoMs, it.codedSeenAgoMs) }
+                    .filter { it.nodeId !in links.keys && CodedPhyPolicy.codedOnly(it.codedLagMs) }
                     .map { it.nodeId }
             } else {
                 emptyList()
@@ -1281,7 +1300,7 @@ class BluetoothMeshTransport(
      * Coded-only advert lands on Coded, no initiating-PHY mask needed). Null when neither address is known.
      */
     private fun dialTarget(snap: BlePresenceTracker.Snapshot): Pair<BluetoothDevice, Boolean>? {
-        val viaCoded = codedOn() && CodedPhyPolicy.dialCoded(snap.oneMSeenAgoMs, snap.codedSeenAgoMs)
+        val viaCoded = codedOn() && CodedPhyPolicy.dialCoded(snap.codedLagMs)
         val device = if (viaCoded) codedDeviceFor[snap.nodeId] else deviceFor[snap.nodeId] ?: codedDeviceFor[snap.nodeId]
         return device?.let { it to viaCoded }
     }

@@ -5,8 +5,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * One sighted peer as the Coded PHY experiment sees it: its 1M-scale RSSI, each PHY's own smoothed advert RSSI, and
- * when each PHY last heard it.
+ * One sighted peer as the Coded PHY experiment sees it: its 1M-scale RSSI, each PHY's own smoothed advert RSSI, when
+ * each PHY last heard it, and the 1M listening its Coded hits have outlasted its 1M ones by
+ * ([BlePresenceTracker.Snapshot.codedLagMs]).
  */
 data class PhyPeerStatus(
     val nodeId: String,
@@ -15,6 +16,7 @@ data class PhyPeerStatus(
     val codedSeenAgoMs: Long?,
     val rssi1m: Double? = null,
     val rssiCoded: Double? = null,
+    val codedLagMs: Long? = null,
 )
 
 /** The Coded PHY experiment right now (ADR 2026-10.yvn6), for `…debug.PHY`. */

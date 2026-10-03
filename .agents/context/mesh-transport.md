@@ -556,8 +556,11 @@ that reports `isLeCodedPhySupported`:
   `CodedPhyPolicy.effectiveRssi`; the credit is `PhyTuning.codedCreditDb`), so every −90 floor reads what it always
   did with the experiment off. A Coded hit after a Coded hit is continuous presence across 30 s
   (`codedGapResetMs`), not the 1M path's 8 s.
-- **The dial picks the PHY.** A peer heard on Coded alone (`codedOnly`: its last 1M hit trails its last Coded hit
-  by more than 8 s) is dialed at its Coded address, and a plain L2CAP connect there lands on Coded
+- **The dial picks the PHY.** A peer heard on Coded alone (`codedOnly`: Coded kept hearing it for more than 8 s of
+  *1M listening* after its last 1M hit, `Snapshot.codedLagMs`) is dialed at its Coded address. The clock runs only
+  while a window listens on 1M (`BlePresenceTracker.onOneMListening`), because a Coded-only window cannot hear a 1M
+  advert; on the wall clock it made every close peer Coded-only (the ADR's 2026-10-02 (3) amendment). The peer's mark
+  outlives its presence entry (64, least recently used out). A plain L2CAP connect to that address lands on Coded
   (spike-verified). That dial's watchdog is 25 s, not 12 (`CodedPhyPolicy.connectTimeoutMs`): Android's initiator
   listens on Coded 15 ms in every 60 while it connects, and the stack's own direct-connect timeout is 30 s. The
   tie-break and every dial rule are untouched.

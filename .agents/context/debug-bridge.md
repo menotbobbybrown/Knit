@@ -289,7 +289,7 @@ carries `-f 0x20` (`FLAG_INCLUDE_STOPPED_PACKAGES`); `scripts/bridge.sh` always 
   `retrying` / `dark <status>`), `txPower`, `tuning`,
   `links[]` (`nodeId`, `phy` ONE_M|TWO_M|CODED|UNKNOWN, `linkRssi`, `drives`, `attached`, `switches`, `gaveUp`) and
   `peers[]` (`nodeId`, `rssi` on the 1M scale, `oneMSeenAgoMs`, `codedSeenAgoMs`, each PHY's own `rssi1m` /
-  `rssiCoded`). Oracle for a step: `links[].phy` plus `bt phy <id> ONE_M→CODED` in logcat (and the PHY chip on the
+  `rssiCoded`, and `codedLagMs`: the 1M listening its Coded hits outlast its 1M ones by, over 8000 meaning Coded alone). Oracle for a step: `links[].phy` plus `bt phy <id> ONE_M→CODED` in logcat (and the PHY chip on the
   Diagnostics row). A walk's record is logcat: `bt coded heard <id> hits=… rssi=a..b 1m=… eff=… dwell=… promotable=…
   dials=…` once a minute per unlinked peer heard on Coded, `bt scan coded windows on|off`, `bt refused client … codedOnly=`,
   `bt initiating to … via=coded`, and at a drop `bt phy <id> link dropped on <PHY> rssi=… (<reason>)` then

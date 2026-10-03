@@ -233,3 +233,46 @@ promotable at the same physical range as before (its reading never moved); a 1M 
 1M advert stays fresh further out and `CodedPhyPolicy.dialCoded` picks the 1M address over a slightly wider band,
 leaving the `PhyStepper` to step such a link down by its link RSSI, which no advert power touches. The next walk
 should note where the 1M advert is last heard, against the walks above.
+
+## Amendment 2026-10-02 (3) — Coded alone is measured on 1M listening time
+
+**What was observed.** On 2026-10-02 the P9 and P7 sat about 4 m apart in AUTO. Diagnostics showed their link moving
+between Coded and 2M. From the two logs:
+
+- The P9 made four dials `via=coded` that day, at an effective −57 to −77. Three of those links opened on Coded and
+  stepped up to 2M about 35 s later. One was the P7 link at 19:00:46: the transport had just come back up with no
+  link, so its scan ran Coded-only windows, and it dialed P7 at −59.
+- The `codedOnly` test of the first amendment compared the wall-clock times of the last 1M and Coded hits. A Coded-only
+  window is 12 s with the screen on and hears no 1M advert. Each close peer's Coded hits in it therefore trailed its
+  last 1M hit by more than 8 s before the window ended. The same test fed `dialCoded`, `sightedForAdmission` and the
+  scan's `far` set. It could admit a close smaller-id Android dialer as unsighted, against shzv.
+- A peer first heard in a Coded-only window had no 1M hit at all, and that also counted as Coded alone. A bring-up
+  with no link starts on such a window.
+- One step was the stepper's own. At 19:06:55 the P9 read the link at −82 smoothed and stepped down. Its read cadence
+  shows the link at −75 or weaker for most of 19:05:25 to 19:15:39, while its screen was on and the phone was in use. The P7's
+  end read −72 at the same time. The step-up came at −58 at 19:16:09. The thresholds did what they say. A phone held
+  in a hand reaches −82 across a room, so a step-down at that level does not mean a peer is far away.
+
+**What changed.**
+
+- `BlePresenceTracker` keeps a clock that runs only while a scan window listens on 1M. The scan loop starts it with
+  each window that is not Coded-only (`onOneMListening`) and stops it when the window ends, cancellation included.
+- `Snapshot.codedLagMs` is that clock's reading at the peer's latest Coded hit, minus its reading at the peer's last 1M
+  hit. A peer never heard on 1M is measured from its first Coded hit instead. `CodedPhyPolicy.codedOnly` is
+  `codedLagMs > ONE_M_FRESH_MS` (8 s). It is the old rule with wall time replaced by 1M listening time: Coded kept
+  hearing the peer for 8 s of 1M listening after its last 1M hit. `dialCoded`, `sightedForAdmission` and the `far` set
+  all read it.
+- The clock's reading at each peer's last 1M hit outlives its presence entry, up to 64 peers, least recently used out.
+  With the screen off the scan runs 8 s windows two minutes apart, so presence starts over every window. A peer that
+  walked off from 1M range is still judged by the 1M hit it had while close. `clear()` resets the clock and the marks.
+- A peer first heard on Coded is not Coded alone until an all-PHY window has missed its 1M advert for 8 s. A
+  never-met peer at range is judged later than before. That is the cost of not dialing the phone across the table on
+  Coded.
+- `…debug.PHY` reports `codedLagMs` for each peer.
+
+**Not changed:** the step thresholds. The bench says only that −82 is reachable indoors. Moving the thresholds needs
+the link RSSI along a walk, and the stepper does not log its reads yet.
+
+Tests: `CodedPhyPolicyTest`. It covers a Coded-only window after an all-PHY one, a first hit in a Coded-only window, a
+1M advert an all-PHY window misses, a far peer heard only in Coded-only windows, the mark outliving presence, a quiet
+peer keeping its verdict, and `clear()`.

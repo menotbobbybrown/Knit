@@ -96,7 +96,10 @@ object CodedPhyPolicy {
      */
     const val CODED_RSSI_CREDIT_DB = 12.0
 
-    /** How recently a peer's 1M advert must have been heard for a dial to prefer it over its Coded one. */
+    /**
+     * How long a scan may listen on 1M past a peer's last 1M hit, with Coded still hearing it, before the peer counts as
+     * heard on Coded alone ([codedOnly]).
+     */
     const val ONE_M_FRESH_MS = 8_000L
 
     /**
@@ -117,23 +120,19 @@ object CodedPhyPolicy {
     }
 
     /**
-     * Whether only the Coded PHY hears this peer now: a Coded advert was heard, and no 1M one was, or the last 1M one
-     * trails the last Coded one by more than [ONE_M_FRESH_MS]. Measured as that *lag*, never as the 1M advert's age:
-     * between scan windows a close peer's two sightings go stale together, and it is no more Coded-only for that.
+     * Whether only the Coded PHY hears this peer now: Coded kept hearing it for more than [ONE_M_FRESH_MS] of 1M
+     * listening after its last 1M hit — [codedLagMs] is [BlePresenceTracker.Snapshot.codedLagMs]. A lag, never the 1M
+     * advert's age: between scan windows a close peer's two sightings go stale together. And 1M *listening*, never wall
+     * time: a Coded-only window hears no 1M advert, so on the wall clock it made every close peer Coded-only by its end,
+     * and links in one room opened on Coded (the 2026-10-02 bench, ADR 2026-10.yvn6).
      */
-    fun codedOnly(
-        oneMSeenAgoMs: Long?,
-        codedSeenAgoMs: Long?,
-    ): Boolean = codedSeenAgoMs != null && (oneMSeenAgoMs == null || oneMSeenAgoMs - codedSeenAgoMs > ONE_M_FRESH_MS)
+    fun codedOnly(codedLagMs: Long?): Boolean = codedLagMs != null && codedLagMs > ONE_M_FRESH_MS
 
     /**
      * Whether a dial should use the peer's Coded address rather than its 1M one: only when the peer is [codedOnly] —
      * a link that can open on 1M opens there (faster, and the stack's own choice).
      */
-    fun dialCoded(
-        oneMSeenAgoMs: Long?,
-        codedSeenAgoMs: Long?,
-    ): Boolean = codedOnly(oneMSeenAgoMs, codedSeenAgoMs)
+    fun dialCoded(codedLagMs: Long?): Boolean = codedOnly(codedLagMs)
 
     /**
      * Whether a link that just went down on its own (not evicted or stopped) should make this phone's Coded advert fast
@@ -181,7 +180,7 @@ object CodedPhyPolicy {
     fun sightedForAdmission(
         snap: BlePresenceTracker.Snapshot?,
         codedOn: Boolean,
-    ): Boolean = snap != null && !(codedOn && codedOnly(snap.oneMSeenAgoMs, snap.codedSeenAgoMs))
+    ): Boolean = snap != null && !(codedOn && codedOnly(snap.codedLagMs))
 
     /**
      * What the next presence scan window listens on. While the experiment runs, a phone with no link, or with an

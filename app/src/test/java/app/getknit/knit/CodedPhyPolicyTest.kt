@@ -126,47 +126,134 @@ class CodedPhyPolicyTest {
 
     @Test
     fun aDialPrefersAFreshOneMAdvert() {
-        assertFalse(CodedPhyPolicy.dialCoded(oneMSeenAgoMs = 2_000, codedSeenAgoMs = 1_000))
-        assertTrue(CodedPhyPolicy.dialCoded(oneMSeenAgoMs = 30_000, codedSeenAgoMs = 1_000))
-        assertTrue(CodedPhyPolicy.dialCoded(oneMSeenAgoMs = null, codedSeenAgoMs = 1_000))
-        assertFalse(CodedPhyPolicy.dialCoded(oneMSeenAgoMs = null, codedSeenAgoMs = null))
-        // Both stale together (between scan windows): a close peer, not a Coded-only one.
-        assertFalse(CodedPhyPolicy.dialCoded(oneMSeenAgoMs = 30_000, codedSeenAgoMs = 29_000))
+        assertFalse(CodedPhyPolicy.dialCoded(codedLagMs = 1_000))
+        assertTrue(CodedPhyPolicy.dialCoded(codedLagMs = 29_000))
+        assertFalse(CodedPhyPolicy.dialCoded(codedLagMs = null))
     }
 
     @Test
-    fun codedOnlyIsMeasuredByTheOneMLag() {
-        assertTrue(CodedPhyPolicy.codedOnly(oneMSeenAgoMs = null, codedSeenAgoMs = 1_000))
-        assertTrue(CodedPhyPolicy.codedOnly(oneMSeenAgoMs = 20_000, codedSeenAgoMs = 1_000))
-        assertFalse(CodedPhyPolicy.codedOnly(oneMSeenAgoMs = 9_000, codedSeenAgoMs = 1_000))
-        assertFalse(CodedPhyPolicy.codedOnly(oneMSeenAgoMs = 60_000, codedSeenAgoMs = 55_000))
-        assertFalse(CodedPhyPolicy.codedOnly(oneMSeenAgoMs = 1_000, codedSeenAgoMs = null))
+    fun codedOnlyIsMoreThanEightSecondsOfOneMListening() {
+        assertTrue(CodedPhyPolicy.codedOnly(codedLagMs = 8_001))
+        assertFalse(CodedPhyPolicy.codedOnly(codedLagMs = 8_000))
+        assertFalse(CodedPhyPolicy.codedOnly(codedLagMs = 0))
+        assertFalse(CodedPhyPolicy.codedOnly(codedLagMs = null)) // no Coded hit in this presence
     }
 
-    private fun snapshot(
-        oneMSeenAgoMs: Long?,
-        codedSeenAgoMs: Long?,
-    ) = BlePresenceTracker.Snapshot(
-        nodeId = "p",
-        protoVersion = 1,
-        capabilities = 0,
-        psm = 128,
-        digestCue = 0,
-        smoothedRssi = -95.0,
-        dwellMs = 30_000,
-        lastSeenAgoMs = minOf(oneMSeenAgoMs ?: Long.MAX_VALUE, codedSeenAgoMs ?: Long.MAX_VALUE),
-        oneMSeenAgoMs = oneMSeenAgoMs,
-        codedSeenAgoMs = codedSeenAgoMs,
-    )
+    @Test
+    fun aCodedOnlyWindowDoesNotMakeAClosePeerCodedOnly() {
+        // The 2026-10-02 bench: phones 4 m apart, the scan alone, so every other window Coded-only. An all-PHY window
+        // hears the peer on both PHYs; the Coded-only window after it hears Coded alone for 12 s, which on the wall
+        // clock was a 12 s lag, and the dial went to the Coded address.
+        val t = BlePresenceTracker()
+        t.onOneMListening(true, 0)
+        t.onSighting(sighting(-60, coded = false), now = 11_000)
+        t.onSighting(sighting(-60, coded = true), now = 11_500)
+        t.onOneMListening(false, 12_000) // then a 12 s gap
+        t.onSighting(sighting(-60, coded = true), now = 24_500) // the Coded-only window
+        t.onSighting(sighting(-60, coded = true), now = 35_500)
+        val snap = t.snapshots(36_000).single()
+        assertEquals(1_000L, snap.codedLagMs) // the all-PHY window's last second, nothing more
+        assertFalse(CodedPhyPolicy.dialCoded(snap.codedLagMs))
+        assertTrue(CodedPhyPolicy.sightedForAdmission(snap, codedOn = true))
+    }
+
+    @Test
+    fun aPeerFirstHeardInACodedOnlyWindowIsNotCodedOnly() {
+        // A bring-up's first window is Coded-only when the phone has no link: every peer is first heard there.
+        val t = BlePresenceTracker()
+        t.onSighting(sighting(-60, coded = true), now = 500)
+        t.onSighting(sighting(-60, coded = true), now = 11_500)
+        assertEquals(0L, t.snapshots(12_000).single().codedLagMs)
+    }
+
+    @Test
+    fun aPeerWhose1MAdvertAnAllPhyWindowMissesIsCodedOnly() {
+        val t = BlePresenceTracker()
+        t.onOneMListening(true, 0)
+        t.onSighting(sighting(-95, coded = false), now = 1_000) // walking off: the last 1M hit
+        t.onSighting(sighting(-100, coded = true), now = 6_000)
+        assertFalse(CodedPhyPolicy.codedOnly(t.snapshots(6_000).single().codedLagMs))
+        t.onSighting(sighting(-100, coded = true), now = 10_000)
+        assertEquals(9_000L, t.snapshots(10_000).single().codedLagMs)
+        assertTrue(CodedPhyPolicy.codedOnly(t.snapshots(10_000).single().codedLagMs))
+        // A 1M hit puts it back.
+        t.onSighting(sighting(-94, coded = false), now = 11_000)
+        assertFalse(CodedPhyPolicy.codedOnly(t.snapshots(11_000).single().codedLagMs))
+    }
+
+    @Test
+    fun aFarPeerHeardOnlyInCodedOnlyWindowsBecomesCodedOnlyAfterAnAllPhyWindowMissesIt() {
+        val t = BlePresenceTracker()
+        t.onSighting(sighting(-100, coded = true), now = 5_000) // a Coded-only window
+        t.onOneMListening(true, 24_000) // an all-PHY window hears nothing of it
+        t.onOneMListening(false, 36_000)
+        t.onSighting(sighting(-100, coded = true), now = 50_000) // the next Coded-only window
+        val snap = t.snapshots(50_000).single()
+        assertEquals(12_000L, snap.codedLagMs)
+        assertTrue(CodedPhyPolicy.dialCoded(snap.codedLagMs))
+        assertFalse(CodedPhyPolicy.sightedForAdmission(snap, codedOn = true))
+    }
+
+    @Test
+    fun theLastOneMHitOutlivesThePresenceEntry() {
+        // A screen-off scan: windows two minutes apart, so presence starts over every window. The peer was heard on 1M
+        // when it was close; walked off, it is heard on Coded alone in the next all-PHY window.
+        val t = BlePresenceTracker()
+        t.onOneMListening(true, 0)
+        t.onSighting(sighting(-70, coded = false), now = 4_000)
+        t.onOneMListening(false, 8_000)
+        t.onOneMListening(true, 128_000)
+        t.onSighting(sighting(-100, coded = true), now = 128_500) // a fresh presence entry
+        val snap = t.snapshots(128_500).single()
+        assertEquals(0L, snap.dwellMs)
+        assertEquals(4_500L, snap.codedLagMs) // 4 s left of the first window, half a second of this one
+        t.onSighting(sighting(-100, coded = true), now = 132_500)
+        assertTrue(CodedPhyPolicy.codedOnly(t.snapshots(132_500).single().codedLagMs))
+    }
+
+    @Test
+    fun aClosePeerKeepsItsVerdictOnceItGoesQuiet() {
+        // Lag, not age: a peer that went quiet keeps the verdict its last hits gave it, whatever the scan does after.
+        val t = BlePresenceTracker()
+        t.onOneMListening(true, 0)
+        t.onSighting(sighting(-60, coded = false), now = 1_000)
+        t.onSighting(sighting(-60, coded = true), now = 1_500)
+        t.onOneMListening(false, 60_000)
+        assertFalse(CodedPhyPolicy.codedOnly(t.snapshots(60_000).single().codedLagMs))
+    }
+
+    @Test
+    fun clearStopsTheClockAndForgetsTheMarks() {
+        val t = BlePresenceTracker()
+        t.onOneMListening(true, 0)
+        t.onSighting(sighting(-70, coded = false), now = 1_000)
+        t.clear()
+        t.onSighting(sighting(-100, coded = true), now = 30_000)
+        assertEquals(0L, t.snapshots(30_000).single().codedLagMs)
+    }
+
+    private fun snapshot(codedLagMs: Long?) =
+        BlePresenceTracker.Snapshot(
+            nodeId = "p",
+            protoVersion = 1,
+            capabilities = 0,
+            psm = 128,
+            digestCue = 0,
+            smoothedRssi = -95.0,
+            dwellMs = 30_000,
+            lastSeenAgoMs = 2_000,
+            codedLagMs = codedLagMs,
+        )
 
     @Test
     fun aDialerHeardOnCodedAloneIsAdmittedAsUnsighted() {
-        val far = snapshot(oneMSeenAgoMs = null, codedSeenAgoMs = 2_000)
+        val far = snapshot(codedLagMs = 20_000)
         assertFalse(CodedPhyPolicy.sightedForAdmission(far, codedOn = true))
         // The experiment off: judged by presence alone, as always (ADR 2026-09.shzv).
         assertTrue(CodedPhyPolicy.sightedForAdmission(far, codedOn = false))
         // Heard on 1M too: the old tie-break.
-        assertTrue(CodedPhyPolicy.sightedForAdmission(snapshot(oneMSeenAgoMs = 2_500, codedSeenAgoMs = 2_000), codedOn = true))
+        assertTrue(CodedPhyPolicy.sightedForAdmission(snapshot(codedLagMs = 500), codedOn = true))
+        assertTrue(CodedPhyPolicy.sightedForAdmission(snapshot(codedLagMs = null), codedOn = true))
         assertFalse(CodedPhyPolicy.sightedForAdmission(null, codedOn = true))
     }
 

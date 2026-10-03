@@ -208,8 +208,9 @@ import java.nio.ByteBuffer
  *   `--ei fastAdvertMs|fastHoldMs N` the Coded advert's interval after a link at range drops (250) and how long it
  *   holds (180000), until the process dies (`--ez resetTuning true` restores them). The reply: `mode`, `supported`, `advert`
  *   (off|starting|live|dark <status>), `txPower`, the tuning, `links[]` (nodeId, phy, linkRssi, drives, attached,
- *   switches, gaveUp) and `peers[]` (nodeId, rssi on the 1M scale, oneMSeenAgoMs, codedSeenAgoMs, and each PHY's own
- *   rssi1m / rssiCoded).
+ *   switches, gaveUp) and `peers[]` (nodeId, rssi on the 1M scale, oneMSeenAgoMs, codedSeenAgoMs, each PHY's own
+ *   rssi1m / rssiCoded, and codedLagMs — the 1M listening its Coded hits outlast its 1M ones by; over 8000 is Coded
+ *   alone).
  * - [ACTION_HEAL] — nudges the transport to rescan/re-advertise.
  * - [ACTION_PAUSE] / [ACTION_RESUME] — the notification's Pause and Resume, by their store write alone
  *   (`--ei minutes 15|60`, the two offered spans): `MeshService` follows `SettingsStore.meshPausedUntil`, so
@@ -2157,6 +2158,7 @@ class DebugBridgeReceiver :
                             .put("codedSeenAgoMs", it.codedSeenAgoMs ?: JSONObject.NULL)
                             .put("rssi1m", it.rssi1m?.toInt() ?: JSONObject.NULL)
                             .put("rssiCoded", it.rssiCoded?.toInt() ?: JSONObject.NULL)
+                            .put("codedLagMs", it.codedLagMs ?: JSONObject.NULL)
                     },
                 ),
             )
