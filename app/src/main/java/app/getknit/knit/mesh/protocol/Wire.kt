@@ -270,10 +270,18 @@ data class ReactionContent(
     val emoji: String? = null,
 )
 
-/** Content of a [FrameType.BLOB_REQ] frame: the content hash of the requested image blob. */
+/**
+ * Content of a [FrameType.BLOB_REQ] frame: the content hash of the requested blob.
+ *
+ * [offset] is how many bytes of it the asker already holds from a transfer a link drop cut off, so a holder can
+ * stream only the rest (work item #116, ADR 2026-10.wtyc). Null for a whole file, and omitted from the CBOR then,
+ * so a plain ask is byte-identical to every older build's. A holder that predates the field skips it and serves
+ * the whole file, which the asker takes as before; one that knows it echoes it in the link's `FILE_HEADER`.
+ */
 @Serializable
 data class BlobReqContent(
     val hash: String,
+    val offset: Long? = null,
 )
 
 /**

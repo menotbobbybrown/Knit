@@ -39,6 +39,9 @@ class FakeLoopTransport(
     /** `nodeId to key` pairs a test declares as queued or streaming toward that peer. */
     val inFlight = mutableSetOf<Pair<String, String>>()
 
+    /** What every [sendFile] that reached a peer asked of the link, offset included (#116), in order. */
+    val filesSent = java.util.concurrent.CopyOnWriteArrayList<FileMeta>()
+
     /** Bidirectionally links this transport with [other] so they become neighbors. */
     fun connect(other: FakeLoopTransport) {
         if (other.nodeId == nodeId) return
@@ -75,9 +78,11 @@ class FakeLoopTransport(
         to: Peer,
         meta: FileMeta,
     ): Boolean {
-        // In-process: hand the file straight to the linked peer's incomingFiles (same filesystem).
+        // In-process: hand the file straight to the linked peer's incomingFiles (same filesystem). A resume lands as
+        // an honest splice would — the whole file, saying where its stream began.
         val target = links[to.nodeId] ?: return false
-        target._incomingFiles.emit(ReceivedFile(nodeId, file.absolutePath, meta.kind, meta.key, meta.mime))
+        filesSent += meta
+        target._incomingFiles.emit(ReceivedFile(nodeId, file.absolutePath, meta.kind, meta.key, meta.mime, resumedFrom = meta.offset))
         return true
     }
 

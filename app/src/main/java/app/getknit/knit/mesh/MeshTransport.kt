@@ -126,20 +126,29 @@ enum class FileKind(
 /**
  * Metadata sent alongside a file so the receiver can identify it: [kind] (avatar vs attachment),
  * [key] (the blob's content hash, an avatar's too), and the file's [mime] type.
+ *
+ * [offset] is the first byte to send: the asker already holds the ones before it from a transfer a link drop cut
+ * off (work item #116, ADR 2026-10.wtyc). 0 sends the whole file, as every send did before.
  */
 data class FileMeta(
     val kind: FileKind,
     val key: String,
     val mime: String,
+    val offset: Long = 0,
 )
 
-/** A file received from a neighbor, already saved at [path], tagged with its [FileMeta] fields. */
+/**
+ * A file received from a neighbor, already saved at [path], tagged with its [FileMeta] fields. [resumedFrom] is
+ * the byte the stream started at when it was the rest of a cut transfer, spliced onto the prefix this node kept
+ * ([PartialBlobs]); 0 for a whole file. A spliced file that fails its hash check drops that prefix (#116).
+ */
 data class ReceivedFile(
     val fromNodeId: String,
     val path: String,
     val kind: FileKind,
     val key: String,
     val mime: String,
+    val resumedFrom: Long = 0,
 )
 
 /**

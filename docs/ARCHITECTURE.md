@@ -178,7 +178,8 @@ Implementations:
   NDP socket and the BLE L2CAP socket. A byte stream is chunked into length-prefixed records
   `[type:1][len:4 big-endian][payload]`: `FRAME` (one CBOR `WireEnvelope` → `inbound`); a file as
   `FILE_HEADER` (JSON `FileHeaderWire`: kind + key + mime + the stream's `size`, a label the receiver's
-  progress ring reads, ADR 2026-10.y9qh) → `FILE_CHUNK`s → `FILE_END` (→
+  progress ring reads, ADR 2026-10.y9qh, and — when the stream is the rest of a cut transfer — the `offset` it
+  starts at, ADR 2026-10.wtyc) → `FILE_CHUNK`s → `FILE_END` (→
   `incomingFiles`); `DIGEST` (a custody id-list, at most one waiting per link — a newer one takes the
   waiting one's place, ADR 2026-09.tjfb); plus `HELLO`/`KEEPALIVE`. The writer serializes files
   and interleaves live frames *between* chunks so an 8 MiB blob never stalls traffic; a per-file receive
@@ -346,7 +347,7 @@ data class ChatContent(body="", mentions, attachmentHash?, attachmentMime?, enc?
 data class ProfileContent(name, status, avatarHash?, pubKey?, deviceTag?, protoVersion?, capabilities?, prekey?, version?,
                           openToChat = false)                                    // the flag is elided while off
 data class ReactionContent(messageId, emoji?)  ·  ReceiptContent(ackId)  ·  GroupLeaveContent(groupId)
-data class BlobReqContent(hash)  ·  KeyReqContent(nodeIds)               // a groupupdate carries its GroupInfo in `group`
+data class BlobReqContent(hash, offset?)  ·  KeyReqContent(nodeIds)               // a groupupdate carries its GroupInfo in `group`
 
 data class Mention(nodeId, name)                                    // canonical id + rendered @name span
 data class GroupInfo(id, name?, members, createdBy, photoHash?, photoUpdatedAt?)   // self-describing roster on every group frame
@@ -474,12 +475,17 @@ opaque SHA-256-addressed bytes with a MIME string beside them, which is why voic
     `FramedLink.rxFile`, never a memo; the same read gives the chat its progress ring, ADR 2026-10.y9qh);
     otherwise sends a `blobreq` frame (`relay = false`) to **every
     direct neighbor**.
-  - `onRequest(hash, fromNodeId)` — if we hold the blob, send it straight back over the file channel
-    (`FileKind.ATTACHMENT`), unless a copy is already queued or streaming to that peer
+  - `onRequest(hash, fromNodeId, offset)` — if we hold the blob, send it straight back over the file channel
+    (`FileKind.ATTACHMENT`) — from the asker's `offset` when it kept the start of a cut transfer (ADR
+    2026-10.wtyc) — unless a copy is already queued or streaming to that peer
     (`MeshTransport.fileInFlightTo`) or was enqueued inside the per-(hash, peer) **serve memo** (45 s,
     un-stamped if the enqueue is refused). If not, **recurse** by calling `want(hash)` on the asker's
     behalf, and remember nothing about the asker (ADR 2026-09.4tx5): the asker re-asks on its own 60 s
     tick while it still lacks the bytes, and only it can tell whether they are already on the way.
+  - **Resume (ADR 2026-10.wtyc).** A link closed mid-stream hands an attachment's prefix to `PartialBlobs`
+    (session-scoped, keep-the-longer); every ask names its length as the `blobreq` `offset`; the receiving
+    link's `FileIntake` splices the holder's tail onto a copy of it. A spliced file that fails the store's hash
+    check drops the prefix and is asked for from byte 0 at once.
   - `onReceived(...)` — save the blob, clear `fetching`, fire `onObtained`
     (`MessageRepository.setAttachmentPath`, filling the local path on every message referencing the
     hash). Nothing is pushed to anyone: a blob walks hop-by-hop over direct-neighbor file transfers,

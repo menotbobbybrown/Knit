@@ -168,6 +168,51 @@ class LinkFramingTest {
         assertEquals(OlderFileHeader("ATTACHMENT", KEY, "image/jpeg"), olderJson.decodeFromString<OlderFileHeader>(bytes.decodeToString()))
     }
 
+    @Test
+    fun aResumedHeaderCarriesItsOffsetAfterTheTailsSize() {
+        // The rest of a cut transfer (#116): `size` keeps its meaning — the bytes that follow — and the offset rides
+        // last, so the whole blob is offset + size.
+        val header = FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = 400, offset = 600)
+        val bytes = LinkFraming.encodeFileHeader(header)
+        assertEquals("""{"kind":"ATTACHMENT","key":"$KEY","mime":"image/jpeg","size":400,"offset":600}""", bytes.decodeToString())
+        assertEquals(header, LinkFraming.decodeFileHeader(bytes))
+    }
+
+    @Test
+    fun aWholeFileHeaderIsByteIdenticalToTheOneBeforeTheOffset() {
+        // The link JSON encodes defaults, so without EncodeDefault.NEVER every header would gain "offset":null and
+        // the pinned fileHeader vector would move. A whole file is the header every build has always sent.
+        val bytes = LinkFraming.encodeFileHeader(FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = 203_807))
+        assertEquals("""{"kind":"ATTACHMENT","key":"$KEY","mime":"image/jpeg","size":203807}""", bytes.decodeToString())
+    }
+
+    @Test
+    fun anOffsetThatWillNotDecodeRefusesTheFile() {
+        // Unlike the size, the offset says where the bytes go: a receiver that cannot read it cannot place them,
+        // so the header is no header and its stream is skipped.
+        listOf("\"far\"", "1.5", "99999999999999999999", "{}").forEach { bad ->
+            val json = """{"kind":"ATTACHMENT","key":"$KEY","mime":"image/jpeg","size":10,"offset":$bad}"""
+            assertNull(bad, LinkFraming.decodeFileHeader(json.encodeToByteArray()))
+        }
+    }
+
+    @Test
+    fun aSizeThatWillNotDecodeStillKeepsTheOffset() {
+        val json = """{"kind":"ATTACHMENT","key":"$KEY","mime":"image/jpeg","size":"big","offset":600}"""
+        assertEquals(
+            FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = null, offset = 600),
+            LinkFraming.decodeFileHeader(json.encodeToByteArray()),
+        )
+    }
+
+    @Test
+    fun anOlderBuildReadsAResumedHeaderAsItsFields() {
+        // Never sent to one (only a build that reads the offset asks with one), but a stray must not break it.
+        val olderJson = Json { ignoreUnknownKeys = true }
+        val bytes = LinkFraming.encodeFileHeader(FileHeaderWire("ATTACHMENT", KEY, "image/jpeg", size = 400, offset = 600))
+        assertEquals(OlderFileHeader("ATTACHMENT", KEY, "image/jpeg"), olderJson.decodeFromString<OlderFileHeader>(bytes.decodeToString()))
+    }
+
     /** `FileHeaderWire` as every build before #115 declares it. */
     @Serializable
     private data class OlderFileHeader(

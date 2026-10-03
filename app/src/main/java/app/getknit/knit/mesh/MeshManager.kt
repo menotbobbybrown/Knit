@@ -144,6 +144,10 @@ class MeshManager(
     private val blobs: BlobRepository,
     private val imageScreening: ImageScreeningService,
     private val blobStore: MeshBlobStore,
+    // The prefixes of attachments a link drop cut off (work item #116, ADR 2026-10.wtyc), shared with both radios:
+    // [blobExchange] asks with their length. Purged at every [start] beside the blobtx copies, so no plaintext
+    // outlives a session. Required, not defaulted: a rig that forgets it should fail to compile.
+    private val partials: PartialBlobs,
     private val forwardStore: ForwardStore,
     private val notifier: Notifier,
     private val textModeration: ScopedTextModerator,
@@ -226,6 +230,8 @@ class MeshManager(
             // photo, so attribute it back to whoever advertised it, and — for an E2E attachment — screen its
             // decrypted bytes now that both the ciphertext and (from the delivered message) its key are on hand.
             onObtained = { hash, _ -> pipeline.onObtained(hash) },
+            partials = partials,
+            onSpliceRefused = metrics::onSpliceRefused,
         )
 
     // Store-and-forward DM custody: carries DMs we originate/relay and re-offers them to neighbors that
@@ -626,6 +632,7 @@ class MeshManager(
         if (started) return
         started = true
         blobStore.clearTransfers() // drop any plaintext transfer temp files left by a previous session
+        partials.purge() // and the cut transfers' kept prefixes: a resume lives within one session (#116)
         // Child of the app Job so app-scope cancellation still propagates; SupervisorJob isolates a
         // single collector's failure from the rest of the session. The shared handler logs any uncaught
         // throw in a top-level session collector instead of letting it vanish silently.
@@ -2198,6 +2205,8 @@ class MeshManager(
         pendingGroupKeys.sweepExpired()
         keyExchange.sweepExpired()
         blobExchange.sweepExpired()
+        // A kept prefix past its hour, or whose blob arrived some other way (the spool, a second link) (#116).
+        partials.sweep { blobStore.has(it) }
     }
 
     /**
@@ -2542,7 +2551,7 @@ class MeshManager(
                         // the evidence the row's plane only stands in for — a heal round that finds these
                         // bytes in hand must never find them unexplained, whatever order the row lands in.
                         attachmentDefer.noteRadioArrival(file.key)
-                        blobExchange.onReceived(file.key, file.mime, file.path)
+                        blobExchange.onReceived(file.key, file.mime, file.path, file.resumedFrom)
                     }
                 }
             }

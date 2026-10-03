@@ -32,6 +32,7 @@ import java.io.File
 import java.io.RandomAccessFile
 
 @OptIn(ExperimentalCoroutinesApi::class)
+@Suppress("LargeClass") // cohesive single-SUT suite over one FakeChild harness; splitting would scatter it, as MeshManagerTest
 class CompositeMeshTransportTest {
     /** A controllable child transport that records what the composite routes to it. */
     private class FakeChild(
@@ -552,6 +553,27 @@ class CompositeMeshTransportTest {
             composite.sendFile(fileOfSize(CompositeMeshTransport.BULK_MIN_BYTES - 1), Peer("p"), bigAttachment())
             assertEquals("below the arm gate BLE finishes before an NDP would even form", 1, bt.sentFiles.size)
             assertTrue(nan.sentFiles.isEmpty() && nan.expectBulkCalls.isEmpty())
+        }
+
+    @Test
+    fun aResumeWhoseTailIsSmallNeverArmsTheFastPlane() =
+        runTest(UnconfinedTestDispatcher()) {
+            // A big blob cut near its end (#116): only the tail goes out, and a tail under the gate is BLE's to finish
+            // before an NDP would even form — the gate reads the bytes still to send, not the file's.
+            val bt = FakeChild()
+            val nan = FakeChild(highThroughput = true).apply { armBulk = true }
+            val composite = CompositeMeshTransport(listOf(bt, nan), backgroundScope)
+            bt.setNeighbors(Peer("p"))
+            advanceUntilIdle()
+
+            val size = CompositeMeshTransport.BULK_MIN_BYTES * 4
+            val resume = bigAttachment().copy(offset = size - CompositeMeshTransport.BULK_MIN_BYTES + 1)
+            composite.sendFile(fileOfSize(size), Peer("p"), resume)
+            assertEquals(1, bt.sentFiles.size)
+            assertTrue(nan.sentFiles.isEmpty() && nan.expectBulkCalls.isEmpty())
+
+            composite.sendFile(fileOfSize(size), Peer("p"), bigAttachment().copy(offset = 1))
+            assertEquals("a big tail still arms it", listOf("p"), nan.expectBulkCalls)
         }
 
     @Test

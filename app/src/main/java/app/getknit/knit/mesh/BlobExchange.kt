@@ -27,6 +27,11 @@ import app.getknit.knit.mesh.protocol.WireEnvelope
  * eviction) and TTL-swept ([sweepExpired]); the [recentlyServed] serve-memo keeps its 45 s TTL plus a size
  * cap. A peer flooding requests for hashes we don't hold therefore costs bounded memory and work.
  *
+ * A transfer a link drop cut off resumes rather than restarts (work item #116, ADR 2026-10.wtyc): the link keeps
+ * the prefix in [PartialBlobs], every ask names its length as the `blobreq` offset, a holder streams only the
+ * rest ([onRequest]), and a spliced file that fails its hash check drops the prefix and asks from byte 0
+ * ([onReceived]). A holder that predates the field serves the whole file, which lands as before.
+ *
  * Pure (no Android/Room): the transport, blob storage, and identity are injected, so the recursion
  * can be unit-tested with [FakeLoopTransport] and a fake [BlobStore].
  */
@@ -35,6 +40,10 @@ class BlobExchange(
     private val store: BlobStore,
     private val selfId: suspend () -> String,
     private val onObtained: suspend (hash: String, path: String) -> Unit,
+    // The prefixes of transfers a link drop cut off (#116): an ask names how many bytes of the blob we hold.
+    private val partials: PartialBlobs,
+    // A file spliced onto a kept prefix failed its hash check (the owner counts it).
+    private val onSpliceRefused: () -> Unit = {},
     private val newRequestId: () -> String = { FrameId.new() },
     private val now: () -> Long = System::currentTimeMillis,
     // Bounds (overridable so tests can exercise eviction with small values).
@@ -92,8 +101,14 @@ class BlobExchange(
         val arriving = transport.arrivingFiles()
         val missing =
             snapshotFetching()
-                .filterNot { hash -> store.has(hash).also { if (it) clearFetching(hash) } }
-                .filterNot { it in arriving }
+                .filterNot { hash ->
+                    store.has(hash).also { held ->
+                        if (held) {
+                            clearFetching(hash)
+                            partials.drop(hash) // obtained off-mesh: nothing left to resume
+                        }
+                    }
+                }.filterNot { it in arriving }
         if (missing.isEmpty()) return
         val me = selfId()
         missing.forEach { hash -> transport.send(blobRequest(me, hash), peer) }
@@ -108,12 +123,15 @@ class BlobExchange(
         me: String,
         hash: String,
     ): WireEnvelope {
+        // A cut transfer's kept prefix makes the ask a resume: a holder that knows the field streams only the rest,
+        // and one that doesn't sends the whole file, which lands as it always has (#116).
+        val offset = partials.length(hash).takeIf { it > 0 }
         val env =
             RelayEnvelope(
                 type = FrameType.BLOB_REQ,
                 id = newRequestId(),
                 senderId = me,
-                payload = WireCodec.encodePayload(BlobReqContent(hash)),
+                payload = WireCodec.encodePayload(BlobReqContent(hash, offset)),
             )
         return WireEnvelope(relay = false, sig = ByteArray(0), signed = WireCodec.encodeEnvelope(env))
     }
@@ -121,11 +139,13 @@ class BlobExchange(
     /**
      * A neighbor asked us for [hash]: serve it if held, else pull it ourselves so its next ask finds us
      * holding it. Nothing is remembered about the asker — it asks again on its own 60 s tick while it
-     * still lacks the bytes, and stops the moment they arrive from anyone.
+     * still lacks the bytes, and stops the moment they arrive from anyone. [offset] is how many bytes of it the
+     * asker kept from a cut transfer; only the rest is streamed (#116).
      */
     suspend fun onRequest(
         hash: String,
         fromNodeId: String,
+        offset: Long? = null,
     ) {
         val peer = Peer(fromNodeId)
         val file = store.fileFor(hash)
@@ -136,7 +156,11 @@ class BlobExchange(
             // whose serve waits behind a multi-minute blob to the same peer — or was enqueued inside the
             // memo: don't ship a second.
             if (transport.fileInFlightTo(fromNodeId, hash) || servedRecently(hash, fromNodeId)) return
-            if (!transport.sendFile(file, peer, FileMeta(FileKind.ATTACHMENT, hash, mime))) {
+            // A resume streams from the asker's offset: up to the whole length, so a prefix that is already complete
+            // gets an empty tail and its end. Anything else (the peer's claim) is a whole file; the link checks the
+            // offset again against the bytes it opens (FramedLink.streamFile).
+            val from = offset?.takeIf { it in 1..file.length() } ?: 0L
+            if (!transport.sendFile(file, peer, FileMeta(FileKind.ATTACHMENT, hash, mime, offset = from))) {
                 forgetServed(hash, fromNodeId) // nothing went out — let the next ask retry at once
             }
             return
@@ -144,15 +168,42 @@ class BlobExchange(
         want(hash)
     }
 
-    /** A blob we wanted arrived over a link: persist it and notify. */
+    /**
+     * A blob we wanted arrived over a link: persist it and notify. [resumedFrom] is the byte its stream started at
+     * when the link spliced it onto a prefix we kept (#116).
+     */
     suspend fun onReceived(
         hash: String,
         mime: String,
         srcPath: String,
+        resumedFrom: Long = 0,
     ) {
-        val stored = store.saveIncoming(hash, mime, srcPath) ?: return
+        val stored = store.saveIncoming(hash, mime, srcPath)
+        if (stored == null) {
+            // A whole file that fails its hash is the holder's bytes alone: a kept prefix stays, and the tick asks
+            // again as it always has. A spliced one may have failed on the prefix.
+            if (resumedFrom > 0) reaskFromZero(hash)
+            return
+        }
+        partials.drop(hash) // nothing left to resume
         clearFetching(hash)
         onObtained(hash, stored.absolutePath)
+    }
+
+    /**
+     * A file spliced onto [hash]'s kept prefix failed its hash check: drop the prefix (it may be what was wrong) and
+     * ask every neighbor for the whole blob now, rather than resume onto it again (#116). Only when the drop removed
+     * a live prefix — so a peer cannot trigger the ask without first planting one — and never while the bytes are
+     * already arriving on a link (ADR 2026-09.4tx5). The holder that sent the tail answers on its next tick: its
+     * serve memo is unchanged, and other holders answer at once.
+     */
+    private suspend fun reaskFromZero(hash: String) {
+        onSpliceRefused()
+        if (!partials.drop(hash)) return
+        if (store.has(hash) || hash in transport.arrivingFiles()) return
+        recordFetch(hash, now())
+        val req = blobRequest(selfId(), hash)
+        transport.neighbors.value.forEach { transport.send(req, it) }
     }
 
     /** Drops fetches whose last-want time has aged past the TTL — a never-arriving blob is reclaimed and

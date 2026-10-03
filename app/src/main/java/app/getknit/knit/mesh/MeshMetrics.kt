@@ -219,6 +219,9 @@ class MeshMetrics {
     private val framesReplayed = AtomicLong()
     private val healsCompleted = AtomicLong()
     private val blobAsksHandled = AtomicLong()
+    private val filesResumedOut = AtomicLong()
+    private val filesResumedIn = AtomicLong()
+    private val splicesRefused = AtomicLong()
     private val receiptsResent = AtomicLong()
     private val dmSealedV2 = AtomicLong()
     private val dmSealedV3 = AtomicLong()
@@ -443,6 +446,24 @@ class MeshMetrics {
      */
     fun onBlobAskHandled() {
         blobAsksHandled.incrementAndGet()
+    }
+
+    /** We streamed a neighbor only the rest of a blob, from the offset its ask named: a cut transfer resumed (#116). */
+    fun onFileResumedOut() {
+        filesResumedOut.incrementAndGet()
+    }
+
+    /** A link took the rest of a blob onto the prefix we kept from a cut transfer, instead of the whole file (#116). */
+    fun onFileResumedIn() {
+        filesResumedIn.incrementAndGet()
+    }
+
+    /**
+     * A file spliced from a kept prefix and a holder's tail failed its hash check, so the prefix was dropped and the
+     * blob asked for from byte 0 (#116). Anything but zero is a holder or a prefix that was wrong.
+     */
+    fun onSpliceRefused() {
+        splicesRefused.incrementAndGet()
     }
 
     /** A broadcast/group delivery receipt we re-sent to its author because the first best-effort tick may not
@@ -1242,6 +1263,27 @@ class MeshMetrics {
         )
     }
 
+    /**
+     * What resuming cut transfers did (#116): tails served, tails taken onto a kept prefix, and spliced files that
+     * failed their hash. Read through [fileResumes], not [Snapshot]: the snapshot's synthetic default constructor is
+     * at the JVM's 255-slot method limit (each `Long` takes two slots), so it cannot take a single field more — a new
+     * group of counters gets a read of its own like this one, or the snapshot is split first.
+     */
+    data class FileResumes(
+        val servedOut: Long = 0,
+        val takenIn: Long = 0,
+        val splicesRefused: Long = 0,
+    )
+
+    /** The resume counters ([FileResumes]), read beside [snapshot]. */
+    fun fileResumes(): FileResumes = FileResumes(filesResumedOut.get(), filesResumedIn.get(), splicesRefused.get())
+
+    /**
+     * Every counter, read at once. **Full:** its synthetic default constructor takes exactly the JVM's 255 parameter
+     * slots (each `Long` takes two), so one field more fails at class load with `ClassFormatError: Too many arguments
+     * in method signature` — about a hundred unrelated tests crash, not a compile error. A new counter gets a read of
+     * its own beside this one ([fileResumes]), or the snapshot is split into nested groups first.
+     */
     data class Snapshot(
         val framesOriginated: Long,
         val framesDelivered: Long,

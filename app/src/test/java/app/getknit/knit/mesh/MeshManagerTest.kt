@@ -105,6 +105,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -434,6 +435,7 @@ class MeshManagerTest {
                     blobs = blobs,
                     imageScreening = imageScreening,
                     blobStore = blobStore,
+                    partials = PartialBlobs(Files.createTempDirectory("mm-parts").toFile()),
                     forwardStore = forwardStore,
                     notifier = notifier,
                     textModeration = textModeration,

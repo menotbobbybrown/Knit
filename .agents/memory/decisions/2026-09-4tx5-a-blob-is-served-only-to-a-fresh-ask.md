@@ -11,7 +11,9 @@ topics: [mesh, attachments, blob-exchange, bluetooth]
 Status: Accepted (2026-09-19). Work item knit/knit-next#79, seen while verifying #66. Supersedes ADR
 2026-09.ywzn (#53): `BlobExchange.wanters` and `onObtainedOffMesh` are gone. No wire change, no DB change.
 Point 1 amended by ADR 2026-10.y9qh (2026-10-03): `arrivingFiles()` is a map that also says how far each file
-has got, read off `FramedLink.rxFile`; `BlobExchange` still reads only its keys.
+has got, read off `FramedLink.rxFile`; `BlobExchange` still reads only its keys. Amended by ADR 2026-10.wtyc
+(2026-10-03): an ask names the bytes the asker kept from a cut transfer and the holder streams only the rest; a
+fresh ask is still what makes a serve, and the memo and the two link reads are unchanged.
 
 **What was observed.** 2026-09-19 20:43, three phones linked over BLE (P3, Moto G, P9), a 699 KB DM
 attachment P3 → Moto. It crossed the mesh three times to the Moto and twice to P9: P3 served the Moto at

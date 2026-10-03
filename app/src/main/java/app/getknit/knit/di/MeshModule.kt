@@ -23,6 +23,7 @@ import app.getknit.knit.mesh.MeshMetrics
 import app.getknit.knit.mesh.MeshPostSink
 import app.getknit.knit.mesh.MeshStartGate
 import app.getknit.knit.mesh.MeshTransport
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.ProfileFrameSource
 import app.getknit.knit.mesh.PublicChannelSink
 import app.getknit.knit.mesh.StoreDigest
@@ -96,6 +97,9 @@ val meshModule =
         single { PowerMonitor(androidContext(), get()) }
         // Bridges the mesh blob-exchange to the encrypted DB; materializes transfer temp files under cacheDir.
         single { MeshBlobStore(get(), get(), get(), File(androidContext().cacheDir, "blobtx")) }
+        // The prefixes of attachments a link drop cut off, one store for both radios and BlobExchange (#116):
+        // session-scoped (MeshManager.start purges it beside the blobtx copies), so no plaintext outlives a session.
+        single { PartialBlobs(File(androidContext().cacheDir, "blob-partials")) }
         // Demo-screenshot builds (debug-only, `-PseedDemo=true`) swap in a no-op transport that just reports a
         // few connected neighbors (so the UI looks "connected" against the seeded data); the seam returns null
         // in release, where the demo classes don't ship (see the per-variant di/DemoWiring). Production wraps
@@ -134,6 +138,7 @@ val meshModule =
                                     linkCap,
                                     gattPeers = BuildConfig.BLE_GATT_PEERS,
                                     phyMode = phyMode,
+                                    partials = get(),
                                 ),
                             )
                         }
@@ -143,7 +148,7 @@ val meshModule =
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && WifiAwareTransport.isSupported(ctx)) {
                             // SettingsStore is both journals (the attach give-up and the initiator hold, ADR 055 / 2026-09.m8kc).
                             val settings = get<SettingsStore>()
-                            val nan = WifiAwareTransport(ctx, get(), get(), get(), get(), get(), settings, settings)
+                            val nan = WifiAwareTransport(ctx, get(), get(), get(), get(), get(), settings, settings, get())
                             // Debug builds can switch the plane off live (Diagnostics / the bridge's NANOFF); release
                             // hands the composite the bare transport.
                             add(
@@ -259,10 +264,11 @@ val meshModule =
             OkHttpSpoolDialer(allowCleartext = BuildConfig.DEBUG, clientFor = OkHttpSpoolDialer.clientFor(get<InternetGate>()::routeKind))
         }
         // Constructor order: transport, messages, receipts, groups, reactions, peers, metPeers, identity,
-        // settings, blobs, imageScreening, blobStore, forwardStore, notifier, textModeration, messageCrypto,
-        // ratchet, groupRatchet, groupRoots, scope, metrics, ledger, db, spoolDialer.
+        // settings, blobs, imageScreening, blobStore, partials, forwardStore, notifier, textModeration,
+        // messageCrypto, ratchet, groupRatchet, groupRoots, scope, metrics, ledger, db, spoolDialer.
         single {
             MeshManager(
+                get(),
                 get(),
                 get(),
                 get(),

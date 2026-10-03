@@ -1,5 +1,6 @@
 package app.getknit.knit.mesh.link
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.EOFException
@@ -152,13 +153,18 @@ internal object LinkFraming {
     /**
      * The header, or null when it is not one. A header whose [FileHeaderWire.size] will not decode (a string, a
      * fraction, out of range) is read without it: the size is only a label, and a failed decode aborts the file
-     * that follows, so only the three fields the receiver routes on may cost the transfer (#115).
+     * that follows, so only the fields the receiver routes on may cost the transfer (#115). [FileHeaderWire.offset]
+     * is one of those: it says where the bytes go, so one that will not decode refuses the file (#116).
      */
     fun decodeFileHeader(payload: ByteArray): FileHeaderWire? {
         val text = payload.decodeToString()
         return runCatching { json.decodeFromString<FileHeaderWire>(text) }.getOrNull()
-            ?: runCatching { json.decodeFromString<FileHeaderCore>(text).let { FileHeaderWire(it.kind, it.key, it.mime) } }
-                .getOrNull()
+            ?: runCatching {
+                json
+                    .decodeFromString<FileHeaderCore>(
+                        text,
+                    ).let { FileHeaderWire(it.kind, it.key, it.mime, offset = it.offset) }
+            }.getOrNull()
     }
 
     fun encodeDigest(digest: DigestWire): ByteArray = json.encodeToString(digest).encodeToByteArray()
@@ -176,6 +182,13 @@ internal object LinkFraming {
  * sends more than it declared by bytes alone. Null from a build that predates the field, which an older
  * receiver skips under `ignoreUnknownKeys`. This config encodes defaults, so a null would go out as
  * `"size":null` — the sender always fills it.
+ *
+ * [offset] is the blob's byte the stream starts at, when it is the rest of a transfer a link drop cut off (#116,
+ * ADR 2026-10.wtyc): the receiver asked with that many bytes in hand, and splices the stream onto them. [size]
+ * keeps its meaning — the bytes that follow — so the whole blob is `offset + size`. Sent only in answer to a
+ * `blobreq` that carried an offset, which only a build that reads this field sends; and never written as a null
+ * ([EncodeDefault.Mode.NEVER] overrides the config's `encodeDefaults`), so a whole-file header is byte-identical
+ * to the one before the field existed.
  */
 @Serializable
 internal data class FileHeaderWire(
@@ -183,6 +196,7 @@ internal data class FileHeaderWire(
     val key: String,
     val mime: String,
     val size: Long? = null,
+    @EncodeDefault(EncodeDefault.Mode.NEVER) val offset: Long? = null,
 )
 
 /** The fields a receiver routes on, for a header whose [FileHeaderWire.size] will not decode. */
@@ -191,6 +205,7 @@ private data class FileHeaderCore(
     val kind: String,
     val key: String,
     val mime: String,
+    val offset: Long? = null,
 )
 
 /**

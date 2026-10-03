@@ -44,6 +44,7 @@ import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshMetrics
 import app.getknit.knit.mesh.MeshTransport
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.PlaneSupport
 import app.getknit.knit.mesh.ReceivedDigest
@@ -136,6 +137,9 @@ class WifiAwareTransport(
     private val storeDigest: StoreDigest,
     private val attachJournal: NanAttachJournal,
     private val initiatorJournal: NanInitiatorJournal,
+    // Where a link keeps an attachment cut mid-stream and resumes it from (#116, ADR 2026-10.wtyc), shared with
+    // the Bluetooth plane: a transfer the NDP lost can finish over BLE, and the other way round.
+    private val partials: PartialBlobs,
 ) : MeshTransport {
     private val appContext = context.applicationContext
     private val awareManager = appContext.getSystemService(Context.WIFI_AWARE_SERVICE) as WifiAwareManager?
@@ -2707,6 +2711,7 @@ class WifiAwareTransport(
                 socket = link,
                 scope = scope,
                 cacheDir = appContext.cacheDir,
+                partials = partials,
                 metrics = metrics,
                 callbacks = linkCallbacks,
                 now = SystemClock::elapsedRealtime, // share the supervisor's clock for quiescence

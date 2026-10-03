@@ -110,6 +110,8 @@ class GoldenVectorTest {
             "groupLeaveContent" to WireCodec.encodePayload(GroupLeaveContent(groupId = "g-1")),
             "keyReqContent" to WireCodec.encodePayload(KeyReqContent(nodeIds = listOf("a", "b"))),
             "blobReqContent" to WireCodec.encodePayload(BlobReqContent(hash = "h1")),
+            // An ask that resumes a transfer a link drop cut off, 400 000 bytes in (#116, ADR 2026-10.wtyc).
+            "blobReqContentResumed" to WireCodec.encodePayload(BlobReqContent(hash = "h1", offset = 400_000)),
             "typingContent" to WireCodec.encodePayload(TypingContent(groupId = "g-1")),
             "mention" to WireCodec.encodePayload(Mention("node1", "Ann")),
             "replyRef" to WireCodec.encodePayload(ReplyRef("m0", "a", "Ann", "see you", hasAttachment = true)),

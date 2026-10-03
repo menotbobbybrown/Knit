@@ -2,16 +2,14 @@ package app.getknit.knit.mesh.link
 
 import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.DropReason
-import app.getknit.knit.mesh.FileKind
 import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshMetrics
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.ReceivedDigest
 import app.getknit.knit.mesh.ReceivedFile
-import app.getknit.knit.mesh.isValidBlobHash
 import app.getknit.knit.mesh.protocol.WireCodec
-import app.getknit.knit.mesh.transferExtForMime
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,6 +19,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.BufferedOutputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.io.OutputStream
 import java.util.concurrent.atomic.AtomicReference
@@ -54,13 +53,16 @@ interface LinkCallbacks {
  * JVM-unit-testable over a piped [LinkSocket] ([app.getknit.knit.FramedLinkTest]). Callers pass
  * `SystemClock::elapsedRealtime` for [now] so the quiescence props share the supervisor's clock.
  */
-@Suppress("LongParameterList") // a link needs its identity, socket, scope, cache dir, metrics, callbacks, clock
+@Suppress("LongParameterList") // a link needs its identity, socket, scope, cache dir, partials, metrics, callbacks, clock
 class FramedLink(
     val nodeId: String,
     val peer: Peer,
     private val socket: LinkSocket,
     private val scope: CoroutineScope,
     private val cacheDir: File,
+    // Where a cut attachment's prefix goes, and where a resumed one is spliced from (#116) — one store for every
+    // link, so any holder can finish what another started.
+    private val partials: PartialBlobs,
     private val metrics: MeshMetrics,
     private val callbacks: LinkCallbacks,
     private val now: () -> Long,
@@ -92,24 +94,32 @@ class FramedLink(
     var txInProgress = false
         private set
 
-    // The file streaming *in* right now and how far it has got — set at its header, its byte count replaced
-    // after every chunk written, cleared at its end, abort or the link's close, so it is exactly "a FILE_HEADER
-    // is in and no FILE_END yet". `BlobExchange` reads its key through `MeshTransport.arrivingFiles` to keep a
-    // blob whose bytes are already on the way from being asked for again (a 60 s re-ask against a slow BLE
-    // transfer bought a second full copy, work item #79); the chat reads its bytes and declared total to draw
-    // the attachment's progress (#115). One reference, so a reader never pairs one file's key with another's
-    // count. The reader loop writes it, except [close] from the owner's thread, whose null a late chunk update
-    // never undoes ([appendRxFile] updates in place). Read only — a torn link clears its own state.
-    private val rx = AtomicReference<ArrivingFile?>(null)
+    // The receive side: one file streams in at a time, reassembled by [intake] (FileIntake, pulled out of here by
+    // #116 so a cut attachment keeps its prefix and a resumed one splices onto it). Every call into it holds
+    // [rxLock], which [close] takes too, so a teardown from the owner's thread never races the reader on the file
+    // being written; the one call that can copy megabytes runs outside it ([beginRxFile]).
+    private val rxLock = Any()
+    private val intake = FileIntake(cacheDir, partials, nodeId, now, log)
 
-    /** The file streaming in right now, with the bytes in so far and the total its header declared. */
-    val rxFile: ArrivingFile? get() = rx.get()
+    // Set by [close] under [rxLock]. The reader can still dispatch records already buffered behind the socket, and
+    // a header among them must not open a file that nothing will ever clean up.
+    @Volatile
+    private var closed = false
+
+    /**
+     * The file streaming in right now, with the bytes in so far and the total its header declared — exactly "a
+     * FILE_HEADER is in and no FILE_END yet". `BlobExchange` reads its key through `MeshTransport.arrivingFiles`
+     * to keep a blob whose bytes are already on the way from being asked for again (a 60 s re-ask against a slow
+     * BLE transfer bought a second full copy, work item #79); the chat reads its bytes and declared total to draw
+     * the attachment's progress (#115). A torn link clears its own state.
+     */
+    val rxFile: ArrivingFile? get() = intake.arrivingFile
 
     /** The key (the content hash) of the file streaming in right now. */
-    val rxKey: String? get() = rx.get()?.key
+    val rxKey: String? get() = rxFile?.key
 
     /** True while a file streams in: a transport's supervisor holds the link rather than tear it down mid-transfer. */
-    val rxInProgress: Boolean get() = rx.get() != null
+    val rxInProgress: Boolean get() = rxFile != null
 
     // Files queued behind an in-progress file transfer (only one streams at a time).
     private val stash = ArrayDeque<Outbound.FileSend>()
@@ -120,14 +130,6 @@ class FramedLink(
     // already on the link (#79). Guarded by [pendingLock]; touched on the enqueue and writer threads.
     private val pendingFileKeys = HashMap<String, Int>()
     private val pendingLock = Any()
-
-    // Inbound file reassembly (one active file per socket, so no per-file id needed).
-    private var rxOut: OutputStream? = null
-    private var rxTemp: File? = null
-    private var rxMeta: FileMeta? = null
-    private var rxBytes = 0L
-    private var rxAborted = false
-    private var rxStartedAt = 0L
 
     /** Starts the read + write loops. Stamps the quiescence window at link-up (a backfill will extend it). */
     fun start() {
@@ -192,7 +194,10 @@ class FramedLink(
         readerJob?.cancel()
         writerJob?.cancel()
         outbound.close()
-        closeRx()
+        synchronized(rxLock) {
+            closed = true
+            intake.cut() // an attachment cut mid-stream keeps its prefix for the next ask (#116)
+        }
         synchronized(pendingLock) { pendingFileKeys.clear() } // whatever was queued died with the link
         socket.close()
     }
@@ -206,7 +211,7 @@ class FramedLink(
 
     private suspend fun readLoop(input: java.io.InputStream) {
         try {
-            while (scope.isActive) {
+            while (scope.isActive && !closed) {
                 val msg = LinkFraming.read(input) ?: break
                 when (msg.type) {
                     LinkFraming.Type.FRAME -> {
@@ -325,18 +330,32 @@ class FramedLink(
         }
     }
 
-    @Suppress("NestedBlockDepth") // header → (drain frames → read chunk → write chunk → pace) loop → end
-    private suspend fun streamFile(out: OutputStream, item: Outbound.FileSend) {
+    @Suppress("NestedBlockDepth") // open → header → (drain frames → read chunk → write chunk → pace) loop → end
+    private suspend fun streamFile(
+        out: OutputStream,
+        item: Outbound.FileSend,
+    ) {
         txInProgress = true // don't let a supervisor tear down mid transfer
         val startedAt = now()
-        val bytes = item.file.length()
+        val meta = item.meta
         var cfg = PaceConfig() // read before every chunk below; the window rebases onto the first
         val window = PaceWindow(cfg, startedAt)
         try {
-            // The stream's length rides the header so the receiver can show how far it has got (#115).
-            val header = FileHeaderWire(item.meta.kind.wire, item.meta.key, item.meta.mime, size = bytes)
-            LinkFraming.write(out, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(header))
-            item.file.inputStream().use { input ->
+            // Opened before the header goes out: a source that has gone costs this one file, not the link, and the
+            // offset is checked against the bytes actually there.
+            val input = openSource(item.file, meta) ?: return
+            input.use {
+                val length = input.channel.size()
+                // A resume (#116): the asker holds the bytes before the offset, so the stream starts there. Up to the
+                // whole length — a prefix that is already complete gets an empty tail and its end — and anything
+                // else is a whole file. FileInputStream reads from its channel's position.
+                val offset = meta.offset.takeIf { it in 1..length } ?: 0L
+                if (offset > 0) input.channel.position(offset)
+                val bytes = length - offset
+                // The stream's length rides the header so the receiver can show how far it has got (#115), and so
+                // does the byte it starts at when it is the rest of a cut transfer.
+                val header = FileHeaderWire(meta.kind.wire, meta.key, meta.mime, size = bytes, offset = offset.takeIf { it > 0 })
+                LinkFraming.write(out, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(header))
                 val buf = ByteArray(LinkFraming.FILE_CHUNK_BYTES)
                 while (true) {
                     // Interleave live frames between chunks — and flush them NOW so they ride the pace gap ahead
@@ -354,18 +373,30 @@ class FramedLink(
                     val wait = window.fed(n, now())
                     if (wait > 0) delay(wait)
                 }
+                LinkFraming.write(out, LinkFraming.Type.FILE_END)
+                out.flush()
+                touch()
+                if (offset > 0) metrics.onFileResumedOut()
+                // The per-plane throughput evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets), with
+                // the pace the feed ended on (0 = unbounded). A resume's offset rides last, so every parse of the line
+                // before it holds — and `file <KIND>/<hash>` still counts the serves (ADR 2026-09.4tx5).
+                val from = if (offset > 0) " from $offset" else ""
+                log("file ${meta.kind.wire}/${meta.key} ${bytes}B in ${now() - startedAt}ms @${cfg.bytesPerSec} → $nodeId$from")
             }
-            LinkFraming.write(out, LinkFraming.Type.FILE_END)
-            out.flush()
-            touch()
-            // The per-plane throughput evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets), with
-            // the pace the feed ended on (0 = unbounded).
-            log("file ${item.meta.kind.wire}/${item.meta.key} ${bytes}B in ${now() - startedAt}ms @${cfg.bytesPerSec} → $nodeId")
         } finally {
             txInProgress = false
-            notePending(item.meta.key, -1)
+            notePending(meta.key, -1)
         }
     }
+
+    /** [file] opened to stream, or null — logged, and the file skipped — when it is gone (an evicted blob, a cleared cache). */
+    private fun openSource(
+        file: File,
+        meta: FileMeta,
+    ): FileInputStream? =
+        runCatching { FileInputStream(file) }
+            .onFailure { log("source of ${meta.kind.wire}/${meta.key} unreadable, not sent → $nodeId: ${it.message}") }
+            .getOrNull()
 
     /**
      * Writes the waiting digest with the newest id set [sendDigest] handed it, and empties the slot, so a digest
@@ -408,135 +439,30 @@ class FramedLink(
         return wrote
     }
 
-    // --- Inbound file reassembly ---
+    // --- Inbound file reassembly (FileIntake, under [rxLock]) ---
 
     private fun beginRxFile(headerPayload: ByteArray) {
-        closeRx()
-        val header =
-            LinkFraming.decodeFileHeader(headerPayload) ?: run {
-                rxAborted = true
-                return
+        val resume = synchronized(rxLock) { if (closed) null else intake.header(headerPayload) } ?: return
+        // The rest of a cut transfer (#116): copy the kept prefix outside the lock — it can be megabytes, and a
+        // teardown must not wait on it — then install it, or give it up if the link closed meanwhile.
+        resume.copy()
+        val installed =
+            synchronized(rxLock) {
+                if (closed) {
+                    resume.abandon()
+                    false
+                } else {
+                    intake.install(resume)
+                }
             }
-        val temp = File.createTempFile("link-rx-", ".tmp", cacheDir)
-        rxTemp = temp
-        rxOut = BufferedOutputStream(temp.outputStream())
-        val meta =
-            FileMeta(
-                kind = FileKind.fromWire(header.kind),
-                key = header.key,
-                mime = header.mime,
-            )
-        rxMeta = meta
-        rxBytes = 0L
-        rxAborted = false
-        rxStartedAt = now()
-        // The declared size is the sender's label, never a bound: one past the ceiling describes a stream this
-        // link aborts anyway, so it is shown as no total at all (#115).
-        rx.set(ArrivingFile(header.key, 0L, header.size?.takeIf { it in 1..MAX_INCOMING_FILE_BYTES }))
-        // The receive side's oracle that the total crossed. `rx`, not `file`: a bare `file <KIND>/<hash>` grep
-        // counts the serves (ADR 2026-09.4tx5's device check), and the key is the peer's until finalize checks it.
-        log("rx ${rxLabel(meta)} ${header.size ?: "?"}B ← $nodeId")
+        if (installed) metrics.onFileResumedIn()
     }
 
-    private fun appendRxFile(chunk: ByteArray) {
-        if (rxAborted) return
-        val out = rxOut ?: return
-        rxBytes += chunk.size
-        if (rxBytes > MAX_INCOMING_FILE_BYTES) {
-            log("incoming file from $nodeId exceeds ceiling; aborting")
-            abortRx()
-            return
-        }
-        runCatching { out.write(chunk) }
-            // In place, so the null a racing close() wrote stays null.
-            .onSuccess { rx.updateAndGet { it?.copy(bytes = rxBytes) } }
-            .onFailure { abortRx() }
-    }
+    private fun appendRxFile(chunk: ByteArray) = synchronized(rxLock) { if (!closed) intake.chunk(chunk) }
 
     private fun endRxFile() {
-        val (temp, meta) = finishRxFile() ?: return
-        // How long the bytes took to cross: the sender's `file …` line times only its feed into the stack (#114).
-        log("rx ${rxLabel(meta)} ${rxBytes}B in ${now() - rxStartedAt}ms ← $nodeId")
-        scope.launch(Dispatchers.IO) { finalizeIncomingFile(temp, meta) }
-    }
-
-    /** A file's kind and key for a log line, the key only once it reads as a content hash (it is the peer's). */
-    private fun rxLabel(meta: FileMeta): String = "${meta.kind.wire}/${meta.key.takeIf { isValidBlobHash(it) } ?: "<bad key>"}"
-
-    /** Finish the active file, returning (temp, meta) to finalize, or null if none/aborted. */
-    private fun finishRxFile(): Pair<File, FileMeta>? {
-        val out = rxOut
-        val temp = rxTemp
-        val meta = rxMeta
-        rxOut = null
-        rxTemp = null
-        rxMeta = null
-        rx.set(null)
-        runCatching { out?.close() }
-        if (rxAborted || temp == null || meta == null) {
-            temp?.delete()
-            return null
-        }
-        return temp to meta
-    }
-
-    private fun abortRx() {
-        rxAborted = true
-        rx.set(null)
-        runCatching { rxOut?.close() }
-        rxOut = null
-        rxTemp?.delete()
-        rxTemp = null
-    }
-
-    private fun closeRx() {
-        rx.set(null)
-        runCatching { rxOut?.close() }
-        rxOut = null
-        rxTemp?.delete()
-        rxTemp = null
-        rxMeta = null
-    }
-
-    /** Moves a fully-received file into the cache under a safe name and announces it (avatar by node, attachment by hash). */
-    private fun finalizeIncomingFile(
-        temp: File,
-        meta: FileMeta,
-    ) {
-        // [meta.key] is peer-supplied and interpolated into the filename: reject anything but a 64-hex
-        // content hash so a "../" can't escape the cache dir (path traversal → arbitrary in-sandbox write).
-        if (!isValidBlobHash(meta.key)) {
-            temp.delete()
-            log("Rejecting ${meta.kind} from $nodeId: malformed blob key")
-            return
-        }
-        val dest =
-            when (meta.kind) {
-                FileKind.AVATAR -> {
-                    cacheDir.listFiles { f -> f.name.startsWith("avatar-$nodeId-") }?.forEach { it.delete() }
-                    File(cacheDir, "avatar-$nodeId-${meta.key}.jpg")
-                }
-
-                FileKind.ATTACHMENT -> {
-                    File(cacheDir, "attach-${meta.key}.${transferExtForMime(meta.mime)}")
-                }
-            }
-        val cacheRoot = cacheDir.canonicalPath + File.separator
-        if (!dest.canonicalPath.startsWith(cacheRoot)) {
-            temp.delete()
-            log("Rejecting ${meta.kind} from $nodeId: path escapes cache dir")
-            return
-        }
-        runCatching {
-            temp.copyTo(dest, overwrite = true)
-            temp.delete()
-        }.onSuccess {
-            callbacks.onFile(ReceivedFile(nodeId, dest.absolutePath, meta.kind, meta.key, meta.mime))
-        }.onFailure {
-            temp.delete()
-            dest.delete()
-            log("Failed saving ${meta.kind} from $nodeId: ${it.message}")
-        }
+        val finished = synchronized(rxLock) { if (closed) null else intake.end() } ?: return
+        scope.launch(Dispatchers.IO) { intake.finalize(finished)?.let { callbacks.onFile(it) } }
     }
 
     private sealed interface Outbound {
@@ -551,11 +477,5 @@ class FramedLink(
             val file: File,
             val meta: FileMeta,
         ) : Outbound
-    }
-
-    private companion object {
-        // Receive-side ceiling on a file, matching the send cap (AttachmentStore.MAX_BYTES = 8 MiB) plus
-        // headroom for E2E framing (GCM IV+tag) — refuses an unbounded malicious stream that exhausts disk.
-        const val MAX_INCOMING_FILE_BYTES = 8L * 1024 * 1024 + 64 * 1024
     }
 }

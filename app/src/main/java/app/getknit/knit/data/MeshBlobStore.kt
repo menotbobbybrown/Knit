@@ -19,7 +19,9 @@ import java.io.File
  *
  * [transferDir] holds only in-flight transfer files (never the canonical copy, which lives encrypted
  * in the DB) and is purged on mesh start via [clearTransfers]. The transient plaintext window is no
- * larger than the mesh file transfer itself.
+ * larger than the mesh file transfer itself — which, since a cut transfer resumes from the prefix the
+ * receiver kept (`PartialBlobs`, ADR 2026-10.wtyc), can span several links within one session: those
+ * prefixes are purged on mesh start too, and dropped once the blob lands or an hour after their last progress.
  */
 class MeshBlobStore(
     private val blobs: BlobRepository,
@@ -41,7 +43,15 @@ class MeshBlobStore(
             val mime = blobs.mimeFor(hash) ?: "image/jpeg"
             val dest = File(ensureDir(), "$hash.${transferExtForMime(mime)}")
             if (!dest.exists()) {
-                runCatching { dest.writeBytes(bytes) }.getOrElse { return@withContext null }
+                // Written aside and renamed into place: two asks for one blob can race here, and a holder that
+                // streamed a file another serve was still writing would send a short or torn copy — which, spliced
+                // onto a receiver's kept prefix, would cost it that prefix (#116).
+                val staged = runCatching { File.createTempFile("$hash-", ".tmp", ensureDir()) }.getOrElse { return@withContext null }
+                val written = runCatching { staged.writeBytes(bytes) }.isSuccess && staged.renameTo(dest)
+                if (!written) {
+                    staged.delete()
+                    if (!dest.exists()) return@withContext null
+                }
             }
             dest
         }

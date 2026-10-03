@@ -1181,7 +1181,10 @@ class DebugBridgeReceiver :
         return reply("ok", "flagged inbound message injected into $conv").put("conversation", conv).put("id", id)
     }
 
-    private fun metricsJson(snap: MeshMetrics.Snapshot): JSONObject =
+    private fun metricsJson(
+        snap: MeshMetrics.Snapshot,
+        resumes: MeshMetrics.FileResumes = metrics.fileResumes(),
+    ): JSONObject =
         JSONObject()
             .put("originated", snap.framesOriginated)
             .put("delivered", snap.framesDelivered)
@@ -1193,6 +1196,12 @@ class DebugBridgeReceiver :
             .put("framesHeld", snap.framesHeld)
             .put("framesReplayed", snap.framesReplayed)
             .put("receiptsResent", snap.receiptsResent)
+            // A cut attachment resumed from its kept prefix (#116): tails served, tails taken, and splices whose
+            // hash failed (a holder or a prefix that was wrong; the blob is then asked for from byte 0). Read beside
+            // the snapshot, which is at the JVM's constructor-slot limit (MeshMetrics.FileResumes).
+            .put("filesResumedOut", resumes.servedOut)
+            .put("filesResumedIn", resumes.takenIn)
+            .put("splicesRefused", resumes.splicesRefused)
             .put("dmSealedV2", snap.dmSealedV2)
             .put("dmSealedV3", snap.dmSealedV3)
             .put("ticksUnsigned", snap.ticksUnsigned)

@@ -4,14 +4,19 @@ import app.getknit.knit.mesh.ArrivingFile
 import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshTransport
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.ReceivedDigest
 import app.getknit.knit.mesh.ReceivedFile
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.bluetooth.BleFastRoutePolicy
 import app.getknit.knit.mesh.furthestByKey
+import app.getknit.knit.mesh.link.FileHeaderWire
+import app.getknit.knit.mesh.link.FileIntake
 import app.getknit.knit.mesh.link.FrameKey
 import app.getknit.knit.mesh.link.LinkCrossings
+import app.getknit.knit.mesh.link.LinkFraming
+import app.getknit.knit.mesh.protocol.BlobReqContent
 import app.getknit.knit.mesh.protocol.FrameType
 import app.getknit.knit.mesh.protocol.RelayEnvelope
 import app.getknit.knit.mesh.protocol.WireCodec
@@ -64,6 +69,11 @@ class LabTransport(
      * sender's single path would race each other for it (the loser drops the blob silently).
      */
     private val stagingDir: File,
+    /**
+     * This node's store for the prefixes of transfers a cut link left it (#116, ADR 2026-10.wtyc) — the receiving
+     * end of a resume, shared with its manager as the phone's one store is shared by both radios.
+     */
+    internal val partials: PartialBlobs,
     /** The side channel's air this node advertises on and listens to, or null for a node without one. */
     private val pages: LabPages? = null,
     /**
@@ -213,25 +223,121 @@ class LabTransport(
         // receiver reports its key as arriving and the sender as in flight, exactly as a slow BLE link would.
         // Under the `heldFiles` lock, for the reason [holding] is under `held`'s.
         var holdingFiles = false
-        val heldFiles = mutableListOf<ReceivedFile>()
+
+        // With [holdingFiles], how many bytes of the blob a file sent now crosses before it parks ([streamFiles]);
+        // null parks it with none, as [holdFiles] always has.
+        var streamUntil: Long? = null
+
+        // Set by [disconnect] under the `heldFiles` lock: a stream begun on a pipe already torn down is cut at once.
+        var closed = false
+        val heldFiles = mutableListOf<HeldFile>()
 
         /** Parks [file] if this pipe is holding files; false means land it. One lock with [releaseFiles]. */
         fun parkFile(file: ReceivedFile): Boolean =
             synchronized(heldFiles) {
-                if (holdingFiles) heldFiles += file
+                if (holdingFiles) heldFiles += HeldFile.Whole(file)
                 holdingFiles
             }
     }
 
+    /** A file parked on a pipe: one staged whole ([holdFiles]), or one streaming into the receiver's intake. */
+    private sealed interface HeldFile {
+        val key: String
+
+        /** What the receiver reports while it waits: nothing in yet, or the stream's real count. */
+        val arriving: ArrivingFile?
+
+        class Whole(
+            val file: ReceivedFile,
+        ) : HeldFile {
+            override val key: String get() = file.key
+            override val arriving: ArrivingFile get() = ArrivingFile(key, bytes = 0, total = null)
+        }
+
+        class Streaming(
+            val stream: FileStream,
+        ) : HeldFile {
+            override val key: String get() = stream.key
+            override val arriving: ArrivingFile? get() = stream.arriving
+        }
+    }
+
+    /**
+     * One file crossing a pipe into the receiver's real [FileIntake] — the production header, splice, ceiling and
+     * cut (#116) — fed from the sender's bytes rather than a socket. Only the slicing is the lab's.
+     */
+    private class FileStream(
+        private val meta: FileMeta,
+        private val intake: FileIntake,
+        private val source: ByteArray,
+        private val offset: Long,
+    ) {
+        val key: String get() = meta.key
+        private var fed = offset
+
+        val arriving: ArrivingFile? get() = intake.arrivingFile
+
+        /** The header crosses — a resume is spliced onto the receiver's kept prefix, as a link's reader does it. */
+        fun begin() {
+            val size = source.size - offset
+            val header = FileHeaderWire(meta.kind.wire, meta.key, meta.mime, size = size, offset = offset.takeIf { it > 0 })
+            intake.header(LinkFraming.encodeFileHeader(header))?.let { resume ->
+                resume.copy()
+                intake.install(resume)
+            }
+        }
+
+        /** Chunks cross until the receiver holds [until] bytes of the blob (or all of them). */
+        fun feedTo(until: Long) {
+            val end = minOf(until, source.size.toLong())
+            while (fed < end) {
+                val n = minOf(LinkFraming.FILE_CHUNK_BYTES.toLong(), end - fed).toInt()
+                intake.chunk(source.copyOfRange(fed.toInt(), fed.toInt() + n))
+                fed += n
+            }
+        }
+
+        /** The rest crosses and the end with it: the received file, or null when the intake refused it. */
+        fun land(): ReceivedFile? {
+            feedTo(source.size.toLong())
+            return intake.end()?.let { intake.finalize(it) }
+        }
+
+        /** The link dropped under it: the receiver keeps what came, for the next ask. */
+        fun cut() = intake.cut()
+    }
+
     /** Every frame a lossy pipe dropped, for a scenario that asserts on what the air ate. */
     val lost = CopyOnWriteArrayList<WireEnvelope>()
+
+    /** A `blobreq` that crossed one of this node's pipes: to whom, for which hash, from which byte (#116). */
+    data class BlobAsk(
+        val to: String,
+        val hash: String,
+        val offset: Long?,
+    )
+
+    /** Every `blobreq` this node sent that reached its peer, in arrival order — what an ask said, offset included. */
+    val blobAsks = CopyOnWriteArrayList<BlobAsk>()
+
+    /**
+     * A holder on a build that predates the resume (#116): whatever offset the ask named, it streams the whole file
+     * with no offset in the header — what an older Android build or the iOS port before its companion change does.
+     */
+    @Volatile
+    var ignoreOffsets = false
+
+    /** A holder whose bytes are wrong (a bug, a bad disk): the first byte of every stream it sends is flipped. */
+    @Volatile
+    var corruptFiles = false
 
     /** Every frame this transport handed a peer, as `to type id` in send order — the diagnosis of "who served that". */
     val sent = CopyOnWriteArrayList<String>()
 
     /**
      * Every file this transport handed a peer, as `to kind key` in send order — the phone's `file …` log line,
-     * the oracle for "one copy per (hash, link)" (#79). A held file is recorded when it is sent, not released.
+     * the oracle for "one copy per (hash, link)" (#79). A held file is recorded when it is sent, not released. A
+     * resume ends ` from <offset>` (#116), as the phone's line does, so an exact match still counts whole copies.
      */
     val files = CopyOnWriteArrayList<String>()
 
@@ -257,12 +363,16 @@ class LabTransport(
         other: LabTransport,
         publish: Boolean = true,
         lossy: (WireEnvelope) -> Boolean = { false },
+        arm: () -> Unit = {},
     ) {
         if (other.nodeId == nodeId) return
         crossings.forget(other.nodeId)
         other.crossings.forget(nodeId)
         pipes[other.nodeId] = Pipe(other).also { it.lossy = lossy }
         other.pipes[nodeId] = Pipe(this)
+        // The pipes exist and neither end lists the link yet — not in `neighbors.value`, not to a collector — so what
+        // [arm] holds or streams is in place before anything can send over it (`MeshLab.link`).
+        arm()
         // Both ends answer `neighbors.value` with the new link before either end's collectors run (see [current]).
         presentNeighbors()
         other.presentNeighbors()
@@ -275,10 +385,12 @@ class LabTransport(
     /** Publishes the current link set as `neighbors`, which is what starts the profile push on the far side. */
     fun publishNeighbors() = refreshNeighbors()
 
-    /** Unlinks both ways (out of range). Held frames on that link are dropped, as a torn-down link drops them. */
+    /**
+     * Unlinks both ways (out of range). Held frames on that link are dropped, as a torn-down link drops them; a file
+     * streaming across it either way is cut, and its receiver keeps what came — `FramedLink.close()` (#116).
+     */
     fun disconnect(other: LabTransport) {
-        pipes.remove(other.nodeId)
-        other.pipes.remove(nodeId)
+        listOfNotNull(pipes.remove(other.nodeId), other.pipes.remove(nodeId)).forEach { cutStreams(it) }
         crossings.forget(other.nodeId)
         other.crossings.forget(nodeId)
         presentNeighbors()
@@ -343,7 +455,28 @@ class LabTransport(
      */
     fun holdFiles(to: LabTransport) {
         val pipe = pipe(to)
-        synchronized(pipe.heldFiles) { pipe.holdingFiles = true }
+        synchronized(pipe.heldFiles) {
+            pipe.holdingFiles = true
+            pipe.streamUntil = null
+        }
+    }
+
+    /**
+     * From now on, a file this node sends [to] crosses into the receiver's real `FileIntake` until the receiver holds
+     * [untilBytes] of the blob — its header and those bytes across — and parks there: the receiver reports it
+     * arriving with that count, the sender in flight, until [releaseFiles] lands the rest or [disconnect] cuts it
+     * (the receiver then keeps the prefix, as a phone does when a link drops mid-transfer, #116). Arm it before the
+     * link publishes (`MeshLab.link`'s `arm`) when the send is a link-up's re-ask.
+     */
+    fun streamFiles(
+        to: LabTransport,
+        untilBytes: Long,
+    ) {
+        val pipe = pipe(to)
+        synchronized(pipe.heldFiles) {
+            pipe.holdingFiles = true
+            pipe.streamUntil = untilBytes
+        }
     }
 
     /** The keys of the files parked for [to] right now, in send order. */
@@ -358,21 +491,34 @@ class LabTransport(
                 synchronized(pipe.heldFiles) {
                     pipe.heldFiles.toList().also {
                         pipe.heldFiles.clear()
-                        if (it.isEmpty()) pipe.holdingFiles = false
+                        if (it.isEmpty()) {
+                            pipe.holdingFiles = false
+                            pipe.streamUntil = null
+                        }
                     }
                 }
             if (batch.isEmpty()) return
-            batch.forEach { pipe.target._incomingFiles.emit(it) }
+            batch.forEach { held ->
+                val file =
+                    when (held) {
+                        is HeldFile.Whole -> held.file
+                        is HeldFile.Streaming -> held.stream.land()
+                    }
+                file?.let { pipe.target._incomingFiles.emit(it) }
+            }
         }
     }
 
-    /** What every linked sender has parked toward this node: the headers are in, the bytes are not. */
+    /**
+     * What every linked sender has parked toward this node: the headers are in, the bytes are not — or, for a
+     * streamed file, some of them are, and the receiver's intake says how many.
+     */
     override fun arrivingFiles(): Map<String, ArrivingFile> =
         pipes.values
             .flatMap { link ->
-                link.target.pipes[nodeId]?.let { toMe -> synchronized(toMe.heldFiles) { toMe.heldFiles.map { it.key } } } ?: emptyList()
-            }.map { ArrivingFile(it, bytes = 0, total = null) }
-            .furthestByKey()
+                link.target.pipes[nodeId]?.let { toMe -> synchronized(toMe.heldFiles) { toMe.heldFiles.mapNotNull { it.arriving } } }
+                    ?: emptyList()
+            }.furthestByKey()
 
     /** Queued on the link: a file parked toward [nodeId] under [key]. An unheld lab file lands at once. */
     override fun fileInFlightTo(
@@ -556,15 +702,85 @@ class LabTransport(
         chaos?.jitter()
         val pipe = pipes[to.nodeId] ?: return false
         val target = pipe.target
+        // As `FramedLink.streamFile` reads it: a resume up to the whole length, anything else a whole file — and an
+        // older holder's whole file whatever the ask said (#116).
+        val offset = if (ignoreOffsets) 0L else meta.offset.takeIf { it in 1..file.length() } ?: 0L
+        val line = "${to.nodeId} ${meta.kind.wire} ${meta.key}" + if (offset > 0) " from $offset" else ""
+        if (offset > 0 || corruptFiles || streams(pipe)) return sendThroughIntake(pipe, file, meta, offset, line)
+        files += line
         // The receiver ingests and then deletes the staged copy; it must be the receiver's own copy.
         val staged = File(target.stagingDir.apply { mkdirs() }, "${meta.key}-${UUID.randomUUID()}")
         file.copyTo(staged, overwrite = true)
-        files += "${to.nodeId} ${meta.kind.wire} ${meta.key}"
         val received = ReceivedFile(nodeId, staged.absolutePath, meta.kind, meta.key, meta.mime)
         if (pipe.parkFile(received)) return true
         target._incomingFiles.emit(received)
         chaos?.jitter()
         return true
+    }
+
+    private fun streams(pipe: Pipe): Boolean = synchronized(pipe.heldFiles) { pipe.holdingFiles && pipe.streamUntil != null }
+
+    /**
+     * A resume, a holder's wrong bytes or a streamed hold: the bytes cross into the receiver's real `FileIntake`,
+     * which splices a resume onto its kept prefix exactly as a phone's link does. A streamed hold parks after its
+     * mark; anything else lands (or parks whole, under a plain hold) once its end is in.
+     */
+    private suspend fun sendThroughIntake(
+        pipe: Pipe,
+        file: File,
+        meta: FileMeta,
+        offset: Long,
+        // The `files` line, recorded only once the send is committed: a pipe torn down under it refuses the send,
+        // `BlobExchange` forgets the serve, and a line for it would read as a second copy when the next ask is served.
+        line: String,
+    ): Boolean {
+        // A holder with wrong bytes: the first byte this stream carries is flipped, whatever its offset.
+        val source = file.readBytes().also { if (corruptFiles && offset < it.size) it[offset.toInt()] = it[offset.toInt()].inc() }
+        val stream = FileStream(meta, pipe.target.intakeFrom(nodeId), source, offset)
+        val parked =
+            synchronized(pipe.heldFiles) {
+                val until = pipe.streamUntil
+                when {
+                    pipe.closed -> {
+                        return false
+                    }
+
+                    !pipe.holdingFiles || until == null -> {
+                        false
+                    }
+
+                    else -> {
+                        files += line
+                        stream.begin()
+                        stream.feedTo(until)
+                        pipe.heldFiles += HeldFile.Streaming(stream)
+                        true
+                    }
+                }
+            }
+        if (parked) return true
+        files += line
+        stream.begin()
+        val received = stream.land() ?: return true // refused at the receiver: the link carried it for nothing
+        if (pipe.parkFile(received)) return true
+        pipe.target._incomingFiles.emit(received)
+        chaos?.jitter()
+        return true
+    }
+
+    /** A receive side for a file from [from], as each phone link holds one: this node's staging dir and partials. */
+    private fun intakeFrom(from: String): FileIntake =
+        FileIntake(stagingDir.apply { mkdirs() }, partials, from, now = System::currentTimeMillis)
+
+    /** [pipe] went down: every file streaming across it is cut, under its lock, so none is begun after. */
+    private fun cutStreams(pipe: Pipe) {
+        val cut =
+            synchronized(pipe.heldFiles) {
+                pipe.closed = true
+                // Out of the list in the same lock, so a release racing the teardown never lands what was cut.
+                pipe.heldFiles.filterIsInstance<HeldFile.Streaming>().also { pipe.heldFiles.removeAll(it.toSet()) }
+            }
+        cut.forEach { it.stream.cut() }
     }
 
     override suspend fun sendDigest(
@@ -606,6 +822,11 @@ class LabTransport(
     ): InboundFrame? {
         val envelope = WireCodec.decodeEnvelope(wire.signed) ?: return null
         crossings.firstCrossing(fromNodeId, FrameKey.of(wire, envelope)) // in counts: it never goes back this way
+        if (envelope.type == FrameType.BLOB_REQ) {
+            WireCodec.decodePayload<BlobReqContent>(envelope.payload)?.let { ask ->
+                pipes[fromNodeId]?.target?.blobAsks?.add(BlobAsk(nodeId, ask.hash, ask.offset))
+            }
+        }
         pipes[fromNodeId]?.target?.sent?.add(
             "#${SEQ.incrementAndGet()} ${nodeId.take(NODE_ID_CHARS)} ${envelope.type} ${envelope.id} relay=${wire.relay} via=$via",
         )

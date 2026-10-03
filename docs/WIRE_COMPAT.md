@@ -649,6 +649,22 @@ discovery marker, no DB change. `vectors/keyed-v1.json` gained a `fileHeader` re
 *Metadata cost:* none new — the chunk lengths on the link already sum to the size, and a carrier that pulls the
 blob holds every byte of it.
 
+**Precedent — a resume offset on both ends of a blob transfer (`BlobReqContent.offset`, `FileHeaderWire.offset`,
+ADR 2026-10.wtyc, #116).** The ask is CBOR, so rule 1 holds as written: the null is omitted, a plain ask is the
+bytes it always was (`blobReqContent` did not move), and every reader — older Android builds, the iOS port's
+`CBORFields` — skips the key and serves the whole file. The header is the link JSON with `encodeDefaults = true`,
+where `size`'s route ("the sender always fills it") does not fit a field that is usually absent; the field carries
+`@EncodeDefault(EncodeDefault.Mode.NEVER)` instead, which overrides the config, so a whole-file header is
+byte-identical to every earlier build's (`fileHeader` did not move) — the first link field that is omitted rather
+than written as null. Rule 2 fixed the arithmetic: `size` had shipped as "the bytes that follow", so it stays the
+tail's and the whole is `offset + size`; redefining it as the blob's length would have been a repurpose. Where the
+two header fields part ways is what a bad value costs: `size` is a label and fails alone (#115), the offset says
+where the bytes go, so one that will not decode refuses the file (`FileHeaderCore` carries it). No capability bit:
+only a build that reads the header's offset asks with one, and an older holder answers with a whole file the asker
+takes as before. No version bump, no discovery marker, no DB change; `vectors/wire-v1.json` gained
+`blobReqContentResumed` and `vectors/keyed-v1.json` `fileHeaderResumed`, and nothing moved. *Metadata cost:* the
+offset tells each asked neighbour how much of the blob the asker holds — progress, never content.
+
 **When you bump a version layer:** add a round-trip test plus an "unknown higher version drops locally
 but is counted" test. New crypto scheme ⇒ bump `EncEnvelope.MAX_SUPPORTED_VERSION` + every branch that
 tests the version (`InboundPipeline.decryptAndDeliver`, `MeshManager`'s inline-ack give-back,

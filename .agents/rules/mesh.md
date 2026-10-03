@@ -205,6 +205,14 @@ free). Two invariants that are easy to break:
   covers it. Don't add a `noteIncoming` memo or a wanter TTL back. The progress ring the chat draws is the
   same read (`arrivingFiles()` maps each key to the bytes in and the header's declared `size`, ADR
   2026-10.y9qh): that size is the sender's label, never a bound or a stall timer.
+- **A cut attachment resumes from the bytes the receiver kept** (`PartialBlobs`, `FileIntake`, ADR
+  2026-10.wtyc). A link closed mid-stream keeps an attachment's prefix; the ask names its length
+  (`BlobReqContent.offset`), the holder streams the tail and echoes it (`FileHeaderWire.offset`), and the
+  receiving link splices it onto a **copy** of the prefix. A kept prefix is never written to in place, the
+  store is purged at every mesh start (plaintext at rest), and a whole-file stream never discards a longer
+  prefix. `size` is the tail's — the whole is `offset + size`. A spliced file that fails its hash drops the
+  prefix and is asked for from byte 0 at once; a whole file that fails leaves it. Every receive-side change
+  goes through `FileIntake` under the link's lock; the serve memo stays as 4tx5 left it.
 - **The database says which attachments are missing; `BlobExchange`'s `fetching` set is a swept memo of it**
   (ADR 2026-09.ptv8). A `want` parked with no neighbor (a frame heard over the board alone) is reclaimed by
   the 30-min `FETCH_TTL_MS` sweep, and `onNeighborAdded` re-asks only from the memo — so

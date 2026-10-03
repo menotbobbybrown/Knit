@@ -112,6 +112,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.File
+import java.nio.file.Files
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -259,7 +260,16 @@ class InboundPipelineTest {
         val forwardSync = ForwardSync(transport, forwardStore, clock = { 0L })
 
         // A spy so a test can verify what the pipeline asked to pull (the transport has no neighbor to ask).
-        val blobExchange = spyk(BlobExchange(transport, blobStore, selfId = { self.nodeId }, onObtained = { _, _ -> }))
+        val blobExchange =
+            spyk(
+                BlobExchange(
+                    transport,
+                    blobStore,
+                    selfId = { self.nodeId },
+                    onObtained = { _, _ -> },
+                    partials = PartialBlobs(Files.createTempDirectory("pipeline-parts").toFile()),
+                ),
+            )
         val keyExchange = KeyExchange(transport, selfId = { self.nodeId }, signRaw = self.crypto::signRaw, metrics = metrics)
 
         // AckSync's custody-escalation hooks, read lazily so a test can arm them (defaults keep escalation

@@ -56,6 +56,7 @@ import app.getknit.knit.mesh.IntroState
 import app.getknit.knit.mesh.MeshManager
 import app.getknit.knit.mesh.MeshMetrics
 import app.getknit.knit.mesh.MeshTransport
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.RatchetPeerState
 import app.getknit.knit.mesh.SPOOL_COVER_MS
 import app.getknit.knit.mesh.StoreDigest
@@ -194,12 +195,18 @@ class MeshLab {
         return node
     }
 
-    /** Links two started nodes both ways, as a data path coming up would; each side then pushes its profile. */
+    /**
+     * Links two started nodes both ways, as a data path coming up would; each side then pushes its profile. [arm]
+     * runs once the pipes exist and before either end lists the link — in `neighbors.value` or to a collector — the
+     * moment to hold or stream what the link-up itself will send (a re-ask on a newcomer is answered before a
+     * scenario could arm after the link).
+     */
     fun link(
         a: LabNode,
         b: LabNode,
+        arm: () -> Unit = {},
     ) {
-        a.transport.connect(b.transport)
+        a.transport.connect(b.transport, arm = arm)
     }
 
     /**
@@ -819,6 +826,10 @@ class LabNode internal constructor(
         private set
     lateinit var blobs: BlobRepository
         private set
+
+    /** The prefixes of transfers a cut link left this node, rebuilt each boot over one directory as a process is. */
+    lateinit var partials: PartialBlobs
+        private set
     lateinit var reactionStore: ReactionRepository
         private set
     private lateinit var messageCrypto: MessageCrypto
@@ -840,7 +851,8 @@ class LabNode internal constructor(
     internal suspend fun boot() {
         val session = dispatcher(Dispatchers.Default)
         val scope = CoroutineScope(SupervisorJob() + session).also { this.scope = it }
-        transport = LabTransport(nodeId, File(dir, "rx"), pages, chaos)
+        partials = PartialBlobs(File(dir, "blob-partials"), now = now)
+        transport = LabTransport(nodeId, File(dir, "rx"), partials, pages, chaos)
         metrics = MeshMetrics()
         // The Internet plane is opted into through the same two settings the relay editor writes; the
         // settings file persists, so a restart() dials the same spool again.
@@ -949,6 +961,7 @@ class LabNode internal constructor(
                 blobs = blobs,
                 imageScreening = imageScreening,
                 blobStore = blobStore,
+                partials = partials,
                 forwardStore = forwardStore,
                 notifier = notifier,
                 textModeration = allowAll,

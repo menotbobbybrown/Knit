@@ -314,6 +314,13 @@ streams in, 2 s otherwise, only while an attachment it shows is awaited) to draw
 a label, never a bound. The receiver logs `rx <KIND>/<hash> <size|?>B ← <peer>` at the header and
 `rx … <N>B in <ms>ms ← <peer>` at the end — the end line times the bytes on air, where the sender's `file …`
 line times only its feed (a different verb, so a `file ATTACHMENT/<hash>` grep still counts serves).
+Since ADR 2026-10.wtyc (#116) a link closed mid-stream does not throw an attachment's bytes away: its
+`FileIntake` (the receive side, pulled out of `FramedLink` and driven under the link's lock) hands the prefix to
+the shared, session-scoped `PartialBlobs`, the next `blobreq` names its length, and the holder streams the rest
+with the `offset` in its header — `size` is the tail's, and the ring resumes at the offset. The holder's `file …`
+line and the receiver's `rx …` lines end ` from <offset>` on a resume, and the bulk gate below reads the bytes
+still to send. Tails served and taken and splices refused ride `…debug.STATE` (`filesResumedOut`,
+`filesResumedIn`, `splicesRefused`).
 Frames, digests, avatars, and (when no NAN link is already up) sub-128 KiB blobs keep the BLE-first
 route byte-for-byte. Every routing decision logs `file route: <kind>/<key> <N>B → <peer> <choice+why>`
 (tag `CompositeMeshTransport`) and every arm accept/reject logs `bulk arm <peer> …` (tag

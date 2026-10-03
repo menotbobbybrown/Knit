@@ -10,7 +10,10 @@ topics: [mesh, attachments, wire, ui]
 
 Status: Accepted (2026-10-03). Work item knit/knit-next#115, prompted by the Coded walk recorded in #114.
 Amends ADR 2026-09.4tx5: `arrivingFiles()` now carries how far each file has got. An additive link field, no
-capability bit, no version bump, no DB change; one vector added, none moved. Device trial owed.
+capability bit, no version bump, no DB change; one vector added, none moved. Device trial owed. Amended by ADR
+2026-10.wtyc (2026-10-03): a stream that resumes a cut transfer starts its count at the header's `offset`, and
+`size` stays the bytes that follow, so the total is `offset + size`; the receive side now lives in `FileIntake`.
+The note below that the iOS port discards every file record is stale: it takes and serves blobs (its ADR nh55).
 
 **What was observed.** While an attachment streams in, its bubble drew the `WaitingIndicator` (a spinner that
 settles to an hourglass after 30 s, #72) and "Photo appears once a device that has it is reachable". On

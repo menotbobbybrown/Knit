@@ -146,6 +146,16 @@ class KeyedVectorTest {
             LinkFraming.encodeFileHeader(FileHeaderWire(FileKind.ATTACHMENT.wire, fileKey, FILE_MIME, size = FILE_SIZE)),
         )
 
+    // The same photo's header when the stream is the rest of a transfer cut off at FILE_OFFSET (#116): the size is
+    // the tail's, and the offset rides last.
+    private fun fileHeaderResumedRecord(): ByteArray =
+        LinkFraming.encode(
+            LinkFraming.Type.FILE_HEADER,
+            LinkFraming.encodeFileHeader(
+                FileHeaderWire(FileKind.ATTACHMENT.wire, fileKey, FILE_MIME, size = FILE_SIZE - FILE_OFFSET, offset = FILE_OFFSET),
+            ),
+        )
+
     private fun safetyNumber(): String = SafetyNumber.compute(alice.nodeId, alice.bundle.encoded, bob.nodeId, bob.bundle.encoded)
 
     private val file: JsonObject by lazy { VectorFiles.read(FILE) }
@@ -220,6 +230,7 @@ class KeyedVectorTest {
         assertEquals(link("digestFold").getValue("fold").jsonPrimitive.content, "%016x".format(fold()))
         assertEquals(link("advert").getValue("serviceData").jsonPrimitive.content, advert().toHex())
         assertEquals(link("fileHeader").getValue("record").jsonPrimitive.content, fileHeaderRecord().toHex())
+        assertEquals(link("fileHeaderResumed").getValue("record").jsonPrimitive.content, fileHeaderResumedRecord().toHex())
 
         val parsedHello = Protocol.parse(helloPayload().decodeToString())
         assertEquals(alice.nodeId, parsedHello.nodeId)
@@ -298,6 +309,14 @@ class KeyedVectorTest {
                 put("size", FILE_SIZE)
                 put("record", fileHeaderRecord().toHex())
             }
+            putJsonObject("fileHeaderResumed") {
+                put("kind", FileKind.ATTACHMENT.wire)
+                put("key", fileKey)
+                put("mime", FILE_MIME)
+                put("size", FILE_SIZE - FILE_OFFSET)
+                put("offset", FILE_OFFSET)
+                put("record", fileHeaderResumedRecord().toHex())
+            }
             putJsonObject("advert") {
                 put("nodeId", alice.nodeId)
                 put("capabilities", CAPABILITIES)
@@ -325,6 +344,7 @@ class KeyedVectorTest {
         const val ROOM_BODY = "Hello, room"
         const val FILE_MIME = "image/jpeg"
         const val FILE_SIZE = 203_807L
+        const val FILE_OFFSET = 81_920L
         const val DM_BODY = "Hi Bob"
     }
 }

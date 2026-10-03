@@ -38,6 +38,8 @@ document:
 - When your phone lost its last Bluetooth connection to nearby phones, it could start looking for them less
   often almost at once, so it took longer to reconnect when you came back into range. It now keeps looking at
   full speed for three minutes first.
+- A large photo or file on a connection that kept dropping started over each time, so it might never arrive.
+  It now picks up where it stopped, as long as the phone sending the rest runs this version.
 
 ## [2.8.0](https://github.com/getknit/knit/releases/tag/v2.8.0) — 2026-10-03T03:55:42Z
 

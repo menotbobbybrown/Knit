@@ -20,7 +20,8 @@ can evolve *additively* without another break. The three layers:
   `ReactionContent`, `BlobReqContent`, `KeyReqContent`, `TypingContent`) lives inside `payload`; only
   endpoints parse it. Current `type`s: `chat`, `groupupdate`, `profile`, `receipt`, `reaction`,
   `groupleave`, `blobreq`, `keyreq`, `typing` (a best-effort, single-hop, never-custodied "now typing"
-  cue — see the typing-indicator flow).
+  cue — see the typing-indicator flow). A `blobreq` may carry an `offset`: the bytes the asker kept from a
+  transfer a link drop cut off, answered by a link `FILE_HEADER` that echoes it (ADR 2026-10.wtyc).
 
 **One signature authenticates every type**: `WireEnvelope.sig` is raw Ed25519 over `signed` (which
 binds `type`/`id`/`senderId`), verified byte-exact in `MeshManager.verifyInbound`; `blobreq` (with

@@ -5,6 +5,7 @@ import app.getknit.knit.mesh.FileKind
 import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshMetrics
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.ReceivedDigest
 import app.getknit.knit.mesh.ReceivedFile
@@ -51,6 +52,10 @@ class FramedLinkTest {
     val tmp = TemporaryFolder()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // One store for every link a test opens, as both radios share one in the app, so a second link can resume what
+    // the first was cut off from (#116). Kept from a single byte, so a test needs no 16 KiB stream.
+    private val partials by lazy { PartialBlobs(File(tmp.root, "partials"), minBytes = 1) }
 
     @After
     fun tearDown() {
@@ -118,6 +123,7 @@ class FramedLinkTest {
                 socket = socket,
                 scope = scope,
                 cacheDir = tmp.root,
+                partials = partials,
                 metrics = metrics,
                 callbacks = callbacks,
                 now = { 0L },
@@ -576,10 +582,143 @@ class FramedLinkTest {
         assertFalse("a hostile length prefix must not surface a frame", h.callbacks.inbound.isNotEmpty())
     }
 
+    // --- A cut attachment resumes (#116, ADR 2026-10.wtyc) ---
+
+    @Test
+    fun anAttachmentCutByTheLinkClosingIsResumedByTheNextLinkAndLandsWhole() {
+        val key = "7".repeat(64)
+        val body = ByteArray(1000) { (it % 251).toByte() }
+        val first = harness(nodeId = "holder01")
+        writeRecord(first.toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = 1000)))
+        writeRecord(first.toLink, LinkFraming.Type.FILE_CHUNK, body.copyOf(400))
+        assertTrue(awaitUntil { first.link.rxFile == ArrivingFile(key, 400, 1000) })
+        first.link.close() // the radio dropped it 40 % in
+        assertEquals("the prefix is kept for the next ask", 400L, partials.length(key))
+
+        val metrics = MeshMetrics()
+        val second = harness(nodeId = "holder02", metrics = metrics)
+        writeRecord(
+            second.toLink,
+            LinkFraming.Type.FILE_HEADER,
+            LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = 600, offset = 400)),
+        )
+        assertTrue("the ring resumes where it was", awaitUntil { second.link.rxFile == ArrivingFile(key, 400, 1000) })
+        writeRecord(second.toLink, LinkFraming.Type.FILE_CHUNK, body.copyOfRange(400, 1000))
+        writeRecord(second.toLink, LinkFraming.Type.FILE_END)
+        val got = second.callbacks.files.poll(2, TimeUnit.SECONDS)
+        assertNotNull(got)
+        assertEquals(400L, got!!.resumedFrom)
+        assertArrayEquals("spliced byte for byte", body, File(got.path).readBytes())
+        assertEquals("one tail taken onto a kept prefix", 1L, metrics.fileResumes().takenIn)
+    }
+
+    @Test
+    fun aHeaderReadAfterCloseOpensNoFile() {
+        // A socket's buffered input can still hand the reader records after close() (neither LinkSocket closes it):
+        // a header among them must not open a temp file that nothing would ever clean up.
+        val toLink = PipedOutputStream()
+        val linkInput = PipedInputStream(toLink, 1 shl 18)
+        val fromLink = PipedInputStream(1 shl 18)
+        val linkOutput = PipedOutputStream(fromLink)
+        val socket =
+            object : LinkSocket {
+                override val input = linkInput
+                override val output: OutputStream = linkOutput
+
+                override fun close() {
+                    runCatching { linkOutput.close() } // the input stays readable, as a buffered one does
+                }
+            }
+        val callbacks = Recording()
+        val link =
+            FramedLink(
+                nodeId = "late0001",
+                peer = Peer("late0001"),
+                socket = socket,
+                scope = scope,
+                cacheDir = tmp.root,
+                partials = partials,
+                metrics = MeshMetrics(),
+                callbacks = callbacks,
+                now = { 0L },
+            )
+        link.start()
+        link.close()
+        val key = "6".repeat(64)
+        writeRecord(toLink, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(hdr("ATTACHMENT", key, size = 100)))
+        writeRecord(toLink, LinkFraming.Type.FILE_CHUNK, ByteArray(100))
+        writeRecord(toLink, LinkFraming.Type.FILE_END)
+        assertNull("nothing finalizes", callbacks.files.poll(500, TimeUnit.MILLISECONDS))
+        assertNull(link.rxFile)
+        assertTrue("no temp file", tmp.root.listFiles()!!.none { it.name.startsWith("link-rx-") })
+    }
+
+    @Test
+    fun sendFileFromAnOffsetStreamsOnlyTheTailAndSaysSo() {
+        val metrics = MeshMetrics()
+        val h = harness(metrics = metrics)
+        val key = "5".repeat(64)
+        val body = ByteArray(3000) { (it % 97).toByte() }
+        val file = tmp.newFile("tail.bin").apply { writeBytes(body) }
+        h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, key, "image/jpeg", offset = 1000))
+
+        val header = LinkFraming.decodeFileHeader(LinkFraming.read(h.fromLink)!!.payload)!!
+        assertEquals("the size is the tail's", 2000L, header.size)
+        assertEquals(1000L, header.offset)
+        assertArrayEquals(body.copyOfRange(1000, 3000), readFileBody(h.fromLink))
+        assertTrue(awaitUntil { metrics.fileResumes().servedOut == 1L })
+    }
+
+    @Test
+    fun aCompletePrefixGetsAnEmptyTailAndAnOffsetPastTheEndTheWholeFile() {
+        val h = harness()
+        val key = "4".repeat(64)
+        val body = ByteArray(3000) { (it % 89).toByte() }
+        val file = tmp.newFile("edges.bin").apply { writeBytes(body) }
+
+        h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, key, "image/jpeg", offset = 3000))
+        val empty = LinkFraming.decodeFileHeader(LinkFraming.read(h.fromLink)!!.payload)!!
+        assertEquals(0L, empty.size)
+        assertEquals(3000L, empty.offset)
+        assertEquals("no chunk, just the end", 0, readFileBody(h.fromLink).size)
+
+        h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, key, "image/jpeg", offset = 5000))
+        val whole = LinkFraming.decodeFileHeader(LinkFraming.read(h.fromLink)!!.payload)!!
+        assertNull("the peer's nonsense is a whole file", whole.offset)
+        assertEquals(3000L, whole.size)
+        assertArrayEquals(body, readFileBody(h.fromLink))
+    }
+
+    @Test
+    fun aSourceThatIsGoneCostsThatFileNotTheLink() {
+        val h = harness()
+        val key = "3".repeat(64)
+        h.link.sendFile(File(tmp.root, "evicted.bin"), FileMeta(FileKind.ATTACHMENT, key, "image/jpeg"))
+        assertTrue("released", awaitUntil { !h.link.hasPendingFile(key) })
+        val payload = frameBytes(id = "after01", senderId = "me000001")
+        h.link.send(payload)
+        val rec = LinkFraming.read(h.fromLink)
+        assertEquals("no header went out; the link still carries frames", LinkFraming.Type.FRAME, rec!!.type)
+        assertNull(h.callbacks.downs.poll(200, TimeUnit.MILLISECONDS))
+    }
+
+    /** Reads FILE_CHUNK records up to the FILE_END and returns their bytes. */
+    private fun readFileBody(fromLink: PipedInputStream): ByteArray {
+        val out = ByteArrayOutputStream()
+        var rec = LinkFraming.read(fromLink)
+        while (rec != null && rec.type != LinkFraming.Type.FILE_END) {
+            assertEquals(LinkFraming.Type.FILE_CHUNK, rec.type)
+            out.write(rec.payload)
+            rec = LinkFraming.read(fromLink)
+        }
+        return out.toByteArray()
+    }
+
     private fun hdr(
         kind: String,
         key: String,
         size: Long? = null,
+        offset: Long? = null,
     ) = app.getknit.knit.mesh.link
-        .FileHeaderWire(kind = kind, key = key, mime = "image/jpeg", size = size)
+        .FileHeaderWire(kind = kind, key = key, mime = "image/jpeg", size = size, offset = offset)
 }

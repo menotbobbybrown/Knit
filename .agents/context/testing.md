@@ -160,6 +160,19 @@ hop (fixed in `MeshRouter.countOverheard`, pinned by `MeshRouterTest`).
   `digestsSent` names whom a node advertised its digest to — the newcomer batch's last hook, so a re-link
   "as the 60 s re-offer would" waits on it before asserting what the batch did not send. `sent` records the
   peer as `nodeId.take(6)`, not the full id.
+- **A cut transfer is `streamFiles(to, untilBytes)` plus `lab.unlink`** (ADR 2026-10.wtyc). A streamed hold
+  feeds the receiver's real `FileIntake` the header and the blob up to the mark, then parks (the receiver's
+  `arrivingFiles()` reports the real count); `releaseFiles` lands the rest, and `disconnect` — what `lab.unlink`
+  runs — cuts it, so the receiver's `PartialBlobs` (`LabNode.partials`, purged by `start` as on a phone) keeps
+  the prefix. A resumed send (any `FileMeta.offset`) is spliced by the same intake, so the lab runs the
+  production splice; only the slicing is the lab's. Plain `holdFiles` parks stay zero-byte and keep nothing on
+  a cut. `ignoreOffsets` makes a holder an older build (whole files, no offset in the header) and
+  `corruptFiles` a holder with wrong bytes; `blobAsks` records every `blobreq` that crossed (to, hash, offset);
+  `files` lines end ` from <offset>` on a resume (recorded once the send commits), so an exact match still counts
+  whole copies. A link-up's own re-ask is answered before a scenario could arm after it: arm in
+  `lab.link(a, b) { … }`, which runs once the pipes exist and before either end lists the link. And a carried
+  attachment's `blobreq` leaves from the custody step, before the frame is opened, so a holder serving it is no
+  evidence the recipient handled the frame: await the author's receipt before the link goes.
 - **Wait for the frame, not for the state that precedes it.** A settings or DB write the scenario can see
   lands *before* the frame it triggers reaches the transport (`broadcastProfile` bumps the version, then
   stamps, signs and floods), so "the version moved" is not "the frame is parked": `ProfileUpdateLabTest`

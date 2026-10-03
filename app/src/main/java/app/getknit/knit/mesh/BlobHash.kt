@@ -22,7 +22,7 @@ fun sha256Hex(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").d
 /**
  * The extension a blob's short-lived transfer file gets, from its [mime].
  *
- * Cosmetic — the file is named `<hash>.<ext>` on the way out and `attach-<hash>.<ext>` on the way in, and
+ * Cosmetic — the file is named `<hash>.<ext>` on the way out and `attach-<hash>-<n>.<ext>` on the way in, and
  * both ends derive it independently from the mime rather than reading a name off the wire. It lives here
  * because it used to live in *two* places (`MeshBlobStore` for the send side, `FramedLink` for the receive
  * side) as identical `when` blocks that had to be extended together; arbitrary files gave that duplication

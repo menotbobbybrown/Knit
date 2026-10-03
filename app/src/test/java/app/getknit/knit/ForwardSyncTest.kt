@@ -10,6 +10,7 @@ import app.getknit.knit.mesh.ForwardSync
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshRouter
 import app.getknit.knit.mesh.MeshTransport
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.ReceivedFile
 import app.getknit.knit.mesh.TransportHealth
@@ -849,7 +850,14 @@ class ForwardSyncTest {
         val transport = FakeLoopTransport(id)
         val store = FakeForwardStore()
         val blobStore = FakeBlobStore(Files.createTempDirectory("fwd-blob-$id").toFile())
-        val blobExchange = BlobExchange(transport, blobStore, selfId = { id }, onObtained = { _, _ -> })
+        val blobExchange =
+            BlobExchange(
+                transport,
+                blobStore,
+                selfId = { id },
+                onObtained = { _, _ -> },
+                partials = PartialBlobs(Files.createTempDirectory("fwd-parts-$id").toFile()),
+            )
         val delivered = mutableListOf<String>()
         val notified = mutableListOf<String>()
         private val seenDelivered = mutableSetOf<String>()

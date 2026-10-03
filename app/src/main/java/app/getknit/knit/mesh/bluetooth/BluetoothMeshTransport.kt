@@ -27,6 +27,7 @@ import app.getknit.knit.mesh.FileMeta
 import app.getknit.knit.mesh.InboundFrame
 import app.getknit.knit.mesh.MeshMetrics
 import app.getknit.knit.mesh.MeshTransport
+import app.getknit.knit.mesh.PartialBlobs
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.PlaneSupport
 import app.getknit.knit.mesh.ReceivedDigest
@@ -130,6 +131,9 @@ class BluetoothMeshTransport(
     // The Coded PHY experiment's mode (`SettingsStore.debugBlePhyMode`, ADR 2026-10.yvn6): the DI hands OFF, always,
     // while `BuildConfig.BLE_CODED_PHY` keeps it dark — the one seam; nothing here gates on the flag again.
     private val phyMode: Flow<CodedPhyMode> = flowOf(CodedPhyMode.OFF),
+    // Where a link keeps an attachment cut mid-stream and resumes it from (#116, ADR 2026-10.wtyc): one store
+    // shared with the Wi-Fi Aware plane and BlobExchange, so any holder on either radio can finish the transfer.
+    private val partials: PartialBlobs,
 ) : MeshTransport {
     private val appContext = context.applicationContext
     private val bluetoothManager = appContext.getSystemService(BluetoothManager::class.java)
@@ -1540,6 +1544,7 @@ class BluetoothMeshTransport(
         registerLink(clientNodeId, advert, link, sighted, socket.remoteDevice)
     }
 
+    @Suppress("LongMethod") // one registration: the link, its doorbell, its PHY control and the neighbor set, in order
     private fun registerLink(
         nodeId: String,
         advert: Protocol.PeerWire,
@@ -1557,6 +1562,7 @@ class BluetoothMeshTransport(
                 socket = link,
                 scope = scope,
                 cacheDir = appContext.cacheDir,
+                partials = partials,
                 metrics = metrics,
                 callbacks = events,
                 now = SystemClock::elapsedRealtime,

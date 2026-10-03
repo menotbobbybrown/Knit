@@ -313,7 +313,10 @@ class CompositeMeshTransport(
         if (meta.kind != FileKind.ATTACHMENT || fast == null) {
             return childHoldingLinkTo(to.nodeId)?.sendFile(file, to, meta) ?: false
         }
-        val tag = "${meta.kind}/${meta.key} ${file.length()}B → ${to.nodeId}"
+        // A resume sends only the rest of the file (#116): the size gate and the log read the bytes still to send
+        // (the link's own `file …` line names the offset).
+        val bytes = file.length() - meta.offset.coerceIn(0L, file.length())
+        val tag = "${meta.kind}/${meta.key} ${bytes}B → ${to.nodeId}"
         if (fast.neighbors.value.any { it.nodeId == to.nodeId }) {
             // Fast link already up (e.g. a custody sync in flight) — ride it whatever the size; fall back
             // on a teardown race.
@@ -323,7 +326,7 @@ class CompositeMeshTransport(
         }
         // A small blob isn't worth RAISING an NDP for (BLE finishes before the setup would); a big one
         // arms the on-demand bring-up unless the fast plane declines (stale sighting / cooldown / off).
-        val small = file.length() < BULK_MIN_BYTES
+        val small = bytes < BULK_MIN_BYTES
         if (small || !fast.expectBulkTransfer(to.nodeId)) {
             log("file route: $tag ${if (small) "below ${BULK_MIN_BYTES}B arm gate" else "fast plane won't arm"} — link holder")
             return childHoldingLinkTo(to.nodeId)?.sendFile(file, to, meta) ?: false
