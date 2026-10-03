@@ -306,12 +306,21 @@ internal fun DiagnosticsScreenContent(
             }
 
             item {
-                SectionHeader(stringResource(R.string.diagnostics_via_relay, state.relayNodes.size))
+                SectionHeader(stringResource(R.string.diagnostics_indirect, state.indirectNodes.size))
             }
-            if (state.relayNodes.isEmpty()) {
+            if (state.indirectNodes.isEmpty()) {
+                item { EmptyLine(stringResource(R.string.diagnostics_none_indirect)) }
+            } else {
+                items(state.indirectNodes, key = { it.nodeId }) { NodeRow(it, now) }
+            }
+
+            item {
+                SectionHeader(stringResource(R.string.diagnostics_via_relay, state.longRangeNodes.size))
+            }
+            if (state.longRangeNodes.isEmpty()) {
                 item { EmptyLine(stringResource(R.string.diagnostics_none_relay)) }
             } else {
-                items(state.relayNodes, key = { it.nodeId }) { NodeRow(it, now) }
+                items(state.longRangeNodes, key = { it.nodeId }) { NodeRow(it, now) }
             }
 
             // Everyone else we hold a profile for. Capped: this is the peer table, and listing all of it was
@@ -723,16 +732,19 @@ private fun transportName(kind: TransportKind): String =
     )
 
 /**
- * The planes on a node's row — `BLE·NAN` for a directly-connected node, `LoRa` / `Relay` for one reached
- * through something else — or null when the row has nothing to claim. The caller has already narrowed
- * [transports] to the kinds its section may show (see [NodeInfo.transports]); [viaSpool] is the Internet
- * plane, which is deliberately not a transport at all (ADR 019) and so has no [TransportKind].
+ * The planes on a node's row — `BLE·NAN` for a directly-connected node, `via Alex` for one another phone
+ * carried, `LoRa` / `Internet` for one reached long-range — or null when the row has nothing to claim. The
+ * caller has already narrowed [transports] to the kinds its section may show (see [NodeInfo.transports]);
+ * [viaSpool] is the Internet plane, which is deliberately not a transport at all (ADR 019) and so has no
+ * [TransportKind]; [via] is the neighbour that handed us an indirect peer's frame (ADR 2026-10.fw8g).
  */
 @Composable
 private fun transportTag(
     transports: Set<TransportKind>,
     viaSpool: Boolean = false,
+    via: String? = null,
 ): String? {
+    if (via != null) return stringResource(R.string.diagnostics_tag_via, via)
     val ble = stringResource(R.string.diagnostics_tag_ble)
     val nan = stringResource(R.string.diagnostics_tag_nan)
     val lora = stringResource(R.string.diagnostics_tag_lora)
@@ -749,6 +761,9 @@ private fun transportTag(
 
 /** How faded the relay dot is against the filled direct one — present, but weaker evidence. */
 private const val RELAY_DOT_ALPHA = 0.45f
+
+/** The indirect dot sits between the two: live traffic a few radio hops out, but not this peer's radio. */
+private const val INDIRECT_DOT_ALPHA = 0.7f
 
 @Composable
 private fun TransportTag(label: String) {
@@ -809,12 +824,13 @@ private fun NodeRow(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Three strengths of evidence, three dots: filled = a radio saw this peer itself; faded = something
-        // carried its traffic for us; muted = we only hold its profile.
+        // Four strengths of evidence, four dots: filled = a radio saw this peer itself; lighter = another phone
+        // carried its traffic over the radio mesh; faded = a long-range plane did; muted = we only hold its profile.
         val dotColor =
             when (node.reach) {
                 Reach.Direct -> MaterialTheme.knitColors.positive
-                Reach.Relay -> MaterialTheme.knitColors.positive.copy(alpha = RELAY_DOT_ALPHA)
+                Reach.Indirect -> MaterialTheme.knitColors.positive.copy(alpha = INDIRECT_DOT_ALPHA)
+                Reach.LongRange -> MaterialTheme.knitColors.positive.copy(alpha = RELAY_DOT_ALPHA)
                 Reach.Known -> MaterialTheme.colorScheme.outline
             }
         Box(modifier = Modifier.size(10.dp).clip(CircleShape).background(dotColor))
@@ -832,7 +848,7 @@ private fun NodeRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        val tag = transportTag(node.transports, node.viaSpool)
+        val tag = transportTag(node.transports, node.viaSpool, node.via)
         val age = node.profileUpdatedAt?.let { compactTimeAgo(it, now) }
         tag?.let { TransportTag(it) }
         phy?.let {
@@ -1299,6 +1315,23 @@ fun NodeRowCodedPreview() =
 
 @Preview(showBackground = true)
 @Composable
+fun NodeRowIndirectPreview() =
+    KnitPreview {
+        NodeRow(
+            node =
+                NodeInfo(
+                    nodeId = "d4e5f6a1b2c3",
+                    displayName = "Barbara Liskov",
+                    reach = Reach.Indirect,
+                    profileUpdatedAt = PREVIEW_NOW - 40 * 60_000L,
+                    via = "Ada Lovelace",
+                ),
+            now = PREVIEW_NOW,
+        )
+    }
+
+@Preview(showBackground = true)
+@Composable
 fun NodeRowRelayPreview() =
     KnitPreview {
         NodeRow(
@@ -1306,7 +1339,7 @@ fun NodeRowRelayPreview() =
                 NodeInfo(
                     nodeId = "a1b2c3d4e5f6",
                     displayName = "Grace Hopper",
-                    reach = Reach.Relay,
+                    reach = Reach.LongRange,
                     profileUpdatedAt = null,
                     transports = setOf(TransportKind.LoRa),
                 ),
@@ -1369,12 +1402,22 @@ fun DiagnosticsScreenPopulatedPreview() =
                                 transports = setOf(TransportKind.Bluetooth),
                             ),
                         ),
-                    relayNodes =
+                    indirectNodes =
+                        listOf(
+                            NodeInfo(
+                                nodeId = "d4e5f6a1b2c3",
+                                displayName = "Barbara Liskov",
+                                reach = Reach.Indirect,
+                                profileUpdatedAt = PREVIEW_NOW - 40 * 60_000L,
+                                via = "Grace Hopper",
+                            ),
+                        ),
+                    longRangeNodes =
                         listOf(
                             NodeInfo(
                                 nodeId = "c3d4e5f6a1b2",
                                 displayName = "Radia Perlman",
-                                reach = Reach.Relay,
+                                reach = Reach.LongRange,
                                 profileUpdatedAt = null,
                                 transports = setOf(TransportKind.LoRa),
                             ),

@@ -29,6 +29,9 @@ document:
   chats. This only removes them from your phone, and the room stays in your list.
 - A GIF now shows as "GIF" rather than "Photo" in the chat list, in message details and when you reply to
   one. Most GIFs from before this update still show as Photo.
+- Diagnostics now lists people whose messages reach you through another nearby phone under Reachable
+  indirectly, along with the phone that passed them on. Their profile says Reachable indirectly too, where it
+  used to say Offline.
 
 ### Fixed
 

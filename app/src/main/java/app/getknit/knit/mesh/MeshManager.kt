@@ -377,6 +377,10 @@ class MeshManager(
     // (a live typer re-cues within the TTL). Populated by handleTyping, cleared by deliverChat on a real message.
     private val typingTracker = TypingTracker(scope)
 
+    // Who reached us over the radio mesh through another phone (ADR 2026-10.fw8g) — fed by the pipeline after
+    // its signature gate, swept on the metrics tick, read only by the reach tiers. Not a routing input.
+    private val relayedPresence = RelayedPresence(selfId = { identity.nodeId() }, clock = clock)
+
     // The inbound half of the mesh: verify → custody → dispatch → deliver/ack, plus the store-and-forward
     // carry gate and the avatar/group-photo/attachment screening. MeshManager still OWNS the DTN services
     // above and the outbound origination choke; the pipeline receives the services by reference and reaches
@@ -433,6 +437,7 @@ class MeshManager(
             onPeerFrameOpened = { senderId, initEph, flagged -> introSync.onPeerFrameOpened(senderId, initEph, flagged) },
             onTransferCtl = onTransferSignal,
             commonsTitle = { commons?.find(it)?.name },
+            noteVerified = relayedPresence::note,
         )
 
     // Reconstructed per session so its inbound collector + relay jobs live on the session scope and are
@@ -556,6 +561,9 @@ class MeshManager(
     /** Every peer reachable over any plane, long-range included — a superset of [neighbors]. */
     override val reachable: StateFlow<Set<Peer>> get() = transport.reachable
 
+    /** Peers heard over the radio mesh through another phone — see [RelayedPresence]. */
+    override val heardIndirectly: StateFlow<Map<String, RelayedHeard>> get() = relayedPresence.heard
+
     /** The short-range planes, so Diagnostics can tag a direct radio apart from a relay path. */
     override val shortRangeKinds: Set<TransportKind> =
         (transport as? CompositeMeshTransport)?.shortRangeKinds ?: setOf(transport.kind)
@@ -621,6 +629,7 @@ class MeshManager(
         val session =
             CoroutineScope(SupervisorJob(scope.coroutineContext[Job]) + sessionDispatcher + meshExceptionHandler)
         sessionScope = session
+        relayedPresence.start()
         router = newRouter(session)
         router.start()
         transport.start()
@@ -685,6 +694,9 @@ class MeshManager(
         scope.launch { ledger.flush() }
         session?.cancel()
         sessionScope = null
+        // A stopped (or paused) mesh hears nothing, so it stops claiming anyone is reachable through it — and,
+        // closed, it ignores a frame the cancelled session was still verifying.
+        relayedPresence.stop()
     }
 
     /** The one place the router is built, so both constructions report their relays to the ledger alike. */
@@ -3198,6 +3210,8 @@ class MeshManager(
                 )
                 // The contribution ledger banks its deltas on the same tick: one DataStore write a minute at most.
                 ledger.flush()
+                // Bounds the indirect-reach table; the linger itself is applied at read (indirectPeers).
+                relayedPresence.sweep()
             }
         }
     }

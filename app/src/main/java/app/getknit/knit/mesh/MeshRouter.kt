@@ -79,8 +79,8 @@ class MeshRouter(
 
     /**
      * Processes one inbound frame: deliver+schedule if new, else count it toward overhear suppression.
-     * [kind] is the radio the frame arrived over, handed to [onDeliver] for the delivery-plane record only —
-     * dedup, relay scheduling and split horizon never read it. Defaulted so a source with no radio (the
+     * [kind] is the radio the frame arrived over, handed to [onDeliver] for the delivery-plane record and the
+     * indirect-reach tracker only — dedup, relay scheduling and split horizon never read it. Defaulted so a source with no radio (the
      * Internet plane's `ScopeSync` bridge) calls the three-argument form.
      */
     suspend fun handleInbound(

@@ -94,7 +94,8 @@ internal val NEVER_HELD: StateFlow<Boolean> = MutableStateFlow(false)
  * [kind] is stamped by [CompositeMeshTransport] as it merges its children — the one place that knows which
  * child emitted the frame (`FramedLink` is shared by Bluetooth and Wi-Fi Aware and cannot tell) — so a
  * transport constructs frames without it and the default [TransportKind.Other] holds for fakes and the demo
- * transport. Read only by the delivery path to record the plane a message arrived on; never by routing.
+ * transport. Read only by the delivery path to record the plane a message arrived on, and by the indirect-reach
+ * tracker to leave LoRa out of it (ADR 2026-10.fw8g); never by routing.
  */
 data class InboundFrame(
     val wire: WireEnvelope,

@@ -24,6 +24,7 @@ import app.getknit.knit.mesh.MeshController
 import app.getknit.knit.mesh.crypto.ContactCard
 import app.getknit.knit.mesh.crypto.SafetyNumber
 import app.getknit.knit.mesh.crypto.VerifyPayload
+import app.getknit.knit.mesh.indirectPeers
 import app.getknit.knit.mesh.meshNodeLabel
 import app.getknit.knit.mesh.spool.SpoolStatus
 import app.getknit.knit.mesh.spool.spoolPresentPeers
@@ -138,8 +139,8 @@ data class ProfileDetailsUiState(
     val discriminator: String? = null,
     val status: String,
     val avatarHash: String?,
-    // Live presence, by the best evidence we have — the same three tiers Diagnostics sorts its sections
-    // by, so a peer it lists under "Reachable long-range" never reads as offline here.
+    // Live presence, by the best evidence we have — the same four tiers Diagnostics sorts its sections
+    // by, so a peer it lists under "Reachable indirectly" or "Reachable long-range" never reads as offline here.
     val reach: Reach,
     val isBlocked: Boolean,
     // E2E verification: whether we hold the peer's key yet, whether the user has verified it, the
@@ -230,12 +231,14 @@ class ProfileDetailsViewModel(
     private val reach: Flow<Reach> =
         combine(
             meshManager.neighbors,
+            meshManager.heardIndirectly,
             meshManager.reachable,
             spoolStatuses,
-        ) { neighbors, reachable, spools ->
+        ) { neighbors, heard, reachable, spools ->
             reachOf(
                 nodeId,
                 nearby = neighbors.mapTo(mutableSetOf()) { it.nodeId },
+                indirect = indirectPeers(heard, clock()).keys,
                 reachable = reachable.mapTo(mutableSetOf()) { it.nodeId },
                 spoolPresent = spoolPresentPeers(spools, clock()),
             )

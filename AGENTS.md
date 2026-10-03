@@ -340,10 +340,12 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   re-ask for a key still queued or streaming to that peer. The lab pins it with `LabTransport.holdFiles` and
   the `files` recorder (one copy per (hash, link)).
 - **When touching a presence dot or an online / offline label** (Profile Details, Diagnostics' node
-  sections, the Contacts dot): the three evidence tiers live in `ui/Reach.kt` — `Direct` is
-  `MeshController.neighbors` (a short-range radio saw the peer's own radio), `Relay` is the long-range reach
-  set or a spool scope its peer recently pushed to (`mesh/spool/SpoolPresence.kt`, one function the dot reads
-  at 45 min and the mesh at `SPOOL_COVER_MS` = 15 min), `Known` is a bare profile row — and both labelled
+  sections, the Contacts dot): the four evidence tiers live in `ui/Reach.kt` — `Direct` is
+  `MeshController.neighbors` (a short-range radio saw the peer's own radio), `Indirect` is
+  `MeshController.heardIndirectly` (another phone handed us the peer's fresh, signed frame over the radio mesh —
+  `mesh/RelayedPresence.kt`, ADR 2026-10.fw8g; presentation only, never a route), `LongRange` is the long-range
+  reach set or a spool scope its peer recently pushed to (`mesh/spool/SpoolPresence.kt`, one function the dot
+  reads at 45 min and the mesh at `SPOOL_COVER_MS` = 15 min), `Known` is a bare profile row — and both labelled
   surfaces derive from `reachOf` so they cannot disagree. READ ADR 2026-09.2ajk before loosening any tier;
   the Contacts list still draws a binary dot from `neighbors` alone.
 - **When touching `MeshManager.watchReachable`, its `flooded` memo / `refloodKey`, or `PROFILE_REFLOOD_MIN_MS`:**

@@ -26,6 +26,9 @@ class FakeMeshController : MeshController {
      */
     override val reachable = MutableStateFlow<Set<Peer>>(emptySet())
 
+    /** Radio-mesh relay stamps (ADR 2026-10.fw8g), raw like production's — the reader applies the linger. */
+    override val heardIndirectly = MutableStateFlow<Map<String, RelayedHeard>>(emptyMap())
+
     /** The proximity planes, as a two-radio phone reports them; a test may narrow or widen it. */
     override var shortRangeKinds: Set<TransportKind> = setOf(TransportKind.Bluetooth, TransportKind.WifiAware)
     override val transportHealth = MutableStateFlow(TransportHealth.Healthy)

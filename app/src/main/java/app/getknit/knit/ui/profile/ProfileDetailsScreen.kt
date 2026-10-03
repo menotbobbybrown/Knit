@@ -91,8 +91,11 @@ import kotlinx.coroutines.launch
 import org.koin.androidx.compose.koinViewModel
 import org.koin.core.parameter.parametersOf
 
-/** How faded the presence dot draws for a relay-reachable peer — the same as a Diagnostics relay row. */
+/** How faded the presence dot draws for a long-range peer — the same as a Diagnostics long-range row. */
 private const val RELAY_DOT_ALPHA = 0.45f
+
+/** How faded the presence dot draws for an indirect peer — the same as a Diagnostics indirect row. */
+private const val INDIRECT_DOT_ALPHA = 0.7f
 
 /** Groups a remove dialog names outright; the rest collapse into "and N more groups". */
 private const val NAMED_GROUPS_MAX = 3
@@ -457,15 +460,16 @@ private fun PeerHeader(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            // Live presence. Three strengths of evidence, three dots, the same as Diagnostics' rows:
-            // filled = a radio saw this peer itself; faded = something (a LoRa board, an Internet relay)
-            // carried its traffic for us; muted = we only hold its profile.
+            // Live presence. Four strengths of evidence, four dots, the same as Diagnostics' rows:
+            // filled = a radio saw this peer itself; lighter = another phone carried its traffic over the radio
+            // mesh; faded = a LoRa board or an Internet relay did; muted = we only hold its profile.
             ProfileBadge(
                 label =
                     stringResource(
                         when (state.reach) {
                             Reach.Direct -> R.string.profile_details_online
-                            Reach.Relay -> R.string.profile_details_via_relay
+                            Reach.Indirect -> R.string.profile_details_indirect
+                            Reach.LongRange -> R.string.profile_details_via_relay
                             Reach.Known -> R.string.profile_details_offline
                         },
                     ),
@@ -479,7 +483,8 @@ private fun PeerHeader(
                             .background(
                                 when (state.reach) {
                                     Reach.Direct -> MaterialTheme.knitColors.positive
-                                    Reach.Relay -> MaterialTheme.knitColors.positive.copy(alpha = RELAY_DOT_ALPHA)
+                                    Reach.Indirect -> MaterialTheme.knitColors.positive.copy(alpha = INDIRECT_DOT_ALPHA)
+                                    Reach.LongRange -> MaterialTheme.knitColors.positive.copy(alpha = RELAY_DOT_ALPHA)
                                     Reach.Known -> MaterialTheme.colorScheme.outline
                                 },
                             ),
@@ -811,6 +816,37 @@ fun ProfileDetailsScreenOnlineVerifiedPreview() =
 
 @Preview(showBackground = true)
 @Composable
+fun ProfileDetailsScreenIndirectPreview() =
+    KnitPreview {
+        ProfileDetailsScreenContent(
+            state =
+                ProfileDetailsUiState(
+                    nodeId = "d4e5f6a1b2c3",
+                    displayName = "Barbara Liskov",
+                    status = "",
+                    avatarHash = null,
+                    reach = Reach.Indirect,
+                    isBlocked = false,
+                    hasKey = true,
+                    verified = false,
+                    safetyNumber = "13579 24680 13579 24680 13579 24680",
+                    myQrPayload = "knit:verify:barbara",
+                ),
+            snackbarHostState = remember { SnackbarHostState() },
+            onBack = {},
+            onMessage = {},
+            onOpenGroup = {},
+            onScan = {},
+            onBlock = {},
+            onUnblock = {},
+            onRemoveContact = {},
+            onMarkVerified = {},
+            onClearVerification = {},
+        )
+    }
+
+@Preview(showBackground = true)
+@Composable
 fun ProfileDetailsScreenViaRelayPreview() =
     KnitPreview {
         ProfileDetailsScreenContent(
@@ -820,7 +856,7 @@ fun ProfileDetailsScreenViaRelayPreview() =
                     displayName = "Grace Hopper",
                     status = "",
                     avatarHash = null,
-                    reach = Reach.Relay,
+                    reach = Reach.LongRange,
                     isBlocked = false,
                     hasKey = true,
                     verified = false,

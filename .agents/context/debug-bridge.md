@@ -43,6 +43,9 @@ carries `-f 0x20` (`FLAG_INCLUDE_STOPPED_PACKAGES`); `scripts/bridge.sh` always 
   on the other device without a screenshot**: the body turning up in the receiver's `messages[]`. Each row
   also carries `received`, which on the sender's own row (`mine: true`) is the ✓✓ — the delivery tick
   coming home — plus its `reactions`; the top-level `typing` map shows a cue that landed.
+  `indirect` lists the authors another phone handed us a fresh frame from within the linger
+  (`{nodeId, name, via, agoMs}`), which is what Diagnostics shows as "Reachable indirectly" (ADR 2026-10.fw8g); the
+  top-level `reachable` array is the *nearby* set (`neighbors`), not `MeshController.reachable`.
 - `…debug.STORE` — dumps the store-and-forward carry set (the **live** rows are the id set the cue-plane
   content digest is folded over; expired-unswept rows are digest/quota/serve-invisible residue awaiting the
   sweep), for diagnosing why two nodes never converge their digests (the churn from a carried-set delta):

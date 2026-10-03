@@ -16,6 +16,7 @@ import app.getknit.knit.identity.Identity
 import app.getknit.knit.mesh.FakeMeshController
 import app.getknit.knit.mesh.PRESENCE_LINGER_MS
 import app.getknit.knit.mesh.Peer
+import app.getknit.knit.mesh.RelayedHeard
 import app.getknit.knit.mesh.crypto.VerifyPayload
 import app.getknit.knit.mesh.spool.ScopeStatus
 import app.getknit.knit.mesh.spool.SpoolStatus
@@ -143,11 +144,12 @@ class ProfileDetailsViewModelTest {
 
     /**
      * The field report: a contact reachable only through an Internet relay sat under "Reachable via relay"
-     * on Diagnostics while their profile said Offline. The profile now sorts by the same three tiers —
-     * a radio's own sighting beats a carried frame, which beats a bare profile row.
+     * on Diagnostics while their profile said Offline. The profile now sorts by the same four tiers —
+     * a radio's own sighting beats a frame another phone carried over the radio mesh, which beats a
+     * long-range plane, which beats a bare profile row.
      */
     @Test
-    fun presenceClimbsFromKnownThroughRelayToDirect() =
+    fun presenceClimbsFromKnownThroughLongRangeAndIndirectToDirect() =
         runTest {
             val vm = vm()
             backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect {} }
@@ -158,7 +160,12 @@ class ProfileDetailsViewModelTest {
             // Heard over a long-range plane (a LoRa board carried its frames): relay reach, not nearby.
             mesh.reachable.value = setOf(Peer(nodeId))
             advanceUntilIdle()
-            assertEquals(Reach.Relay, vm.state.value.reach)
+            assertEquals(Reach.LongRange, vm.state.value.reach)
+
+            // Another phone handed us the peer's own recent frame over the radio mesh (ADR 2026-10.fw8g).
+            mesh.heardIndirectly.value = mapOf(nodeId to RelayedHeard(heardAt = NOW - 60_000L, via = "kai"))
+            advanceUntilIdle()
+            assertEquals(Reach.Indirect, vm.state.value.reach)
 
             // A short-range radio saw the peer itself.
             mesh.neighbors.value = setOf(Peer(nodeId))
@@ -167,6 +174,7 @@ class ProfileDetailsViewModelTest {
 
             mesh.neighbors.value = emptySet()
             mesh.reachable.value = emptySet()
+            mesh.heardIndirectly.value = emptyMap()
             advanceUntilIdle()
             assertEquals(Reach.Known, vm.state.value.reach)
         }
@@ -185,7 +193,7 @@ class ProfileDetailsViewModelTest {
 
             spoolsFlow.value = listOf(spool(scope(nodeId, peerSeenAt = NOW - 60_000L)))
             advanceUntilIdle()
-            assertEquals(Reach.Relay, vm.state.value.reach)
+            assertEquals(Reach.LongRange, vm.state.value.reach)
 
             // Connected and converged, but the peer has never pushed: a scope is not its peer.
             spoolsFlow.value = listOf(spool(scope(nodeId)))

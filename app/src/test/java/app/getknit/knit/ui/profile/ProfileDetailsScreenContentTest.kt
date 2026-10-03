@@ -103,13 +103,21 @@ class ProfileDetailsScreenContentTest {
     }
 
     /**
-     * The presence line names all three tiers, so a contact reachable only through a relay (a LoRa board or
+     * The presence line names all four tiers, so a contact reachable only through a relay (a LoRa board or
      * an Internet spool) reads as such rather than as offline — the same split Diagnostics draws.
      */
     @Test
     fun thePresenceLineNamesEachReachTier() {
-        setContent(reach = Reach.Relay)
+        setContent(reach = Reach.LongRange)
         compose.onNodeWithText(context.getString(R.string.profile_details_via_relay)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.profile_details_offline)).assertDoesNotExist()
+    }
+
+    /** A peer another phone carried over the radio mesh reads as indirect, not offline (ADR 2026-10.fw8g). */
+    @Test
+    fun anIndirectPeerReadsReachableIndirectly() {
+        setContent(reach = Reach.Indirect)
+        compose.onNodeWithText(context.getString(R.string.profile_details_indirect)).assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.profile_details_offline)).assertDoesNotExist()
     }
 

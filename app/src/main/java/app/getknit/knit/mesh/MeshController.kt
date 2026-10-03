@@ -43,6 +43,14 @@ interface MeshController {
     val reachable: StateFlow<Set<Peer>> get() = neighbors
 
     /**
+     * Peers whose own recent frames reached us over the radio mesh through *another* phone, each with when we
+     * last heard one and the neighbour that handed it over ([RelayedPresence], ADR 2026-10.fw8g). Raw stamps:
+     * read only through `indirectPeers`, which applies the linger, and only by `ui/Reach.kt`'s tiers. Evidence
+     * of the peer's traffic, never a route — nothing may send, relay or custody by it. Defaulted for the fakes.
+     */
+    val heardIndirectly: StateFlow<Map<String, RelayedHeard>> get() = NO_RELAYED
+
+    /**
      * The [TransportKind]s that count as short-range, so the UI can tell a proximity tag from a relay one
      * without restating [MeshTransport.shortRange]. Defaulted for the fakes.
      */

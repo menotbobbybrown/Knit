@@ -197,6 +197,11 @@ class InboundPipeline(
     // A commons' advertised name for its notification title (`CommonsStore.find`), null when the operator
     // set none — the notifier then uses the generic room title.
     private val commonsTitle: suspend (conversationId: String) -> String? = { null },
+    // Every frame that passed verifyInbound, with the hop that handed it to us and its plane — the radio mesh's
+    // indirect-reach tracker (MeshManager → RelayedPresence.note, ADR 2026-10.fw8g), which applies its own rule.
+    // Presentation only: it sees the frame after the gate and decides nothing about it.
+    private val noteVerified: suspend (WireEnvelope, RelayEnvelope, fromNodeId: String, TransportKind) -> Unit =
+        { _, _, _, _ -> },
 ) {
     // nodeId -> avatar hash a non-direct peer advertised but whose bytes we're still pulling, so a blob
     // arriving via the multi-hop BlobExchange can be attributed back to the peer that advertised it.
@@ -232,6 +237,7 @@ class InboundPipeline(
         // to is dropped (not delivered locally). We still return normally so MeshRouter relays it
         // onward — other peers verify independently, and we don't become a propagation black hole.
         if (!verifyInbound(env, wire, fromNodeId, kind)) return
+        noteVerified(wire, env, fromNodeId, kind)
         // Carry every floodable frame we see — store-and-forward, so we can re-offer it to a neighbor
         // that joins later. That includes a DM addressed to US: with sealed receipts nobody vaccine-
         // purges (a carrier can't read them), so the delivered DM stays live in every carrier's digest
@@ -378,7 +384,8 @@ class InboundPipeline(
 
     /**
      * The plane an inbound frame arrived on — the single place that maps a delivery source onto a
-     * [DeliveryPlane], and the only reader of [InboundFrame.kind] anywhere.
+     * [DeliveryPlane], and the only reader of [InboundFrame.kind] that decides anything (the indirect-reach
+     * tracker reads it too, for presentation only — ADR 2026-10.fw8g).
      *
      * A spool-tagged source names the Internet plane (it is never a neighbour, so the tag lives in the
      * source id); a frame off the LoRa board names [DeliveryPlane.LoRa] (ADR 040 — kilometre-range, slow,

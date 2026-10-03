@@ -21,6 +21,7 @@ import app.getknit.knit.mesh.PRESENCE_LINGER_MS
 import app.getknit.knit.mesh.Peer
 import app.getknit.knit.mesh.PlaneSupport
 import app.getknit.knit.mesh.RadioSupport
+import app.getknit.knit.mesh.RelayedHeard
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.TransportKind
 import app.getknit.knit.mesh.TransportStatus
@@ -287,7 +288,7 @@ class DiagnosticsViewModelTest {
             assertNull(vm.lastCrash.value)
         }
 
-    // --- reach classification (the Diagnostics screen's three sections) ---
+    // --- reach classification (the Diagnostics screen's four sections) ---
 
     private fun peer(
         nodeId: String,
@@ -363,9 +364,9 @@ class DiagnosticsViewModelTest {
                 setOf(TransportKind.Bluetooth, TransportKind.WifiAware),
                 state.directNodes.first { it.nodeId == "song" }.transports,
             )
-            assertEquals(listOf("moto"), state.relayNodes.map { it.nodeId })
-            assertEquals(setOf(TransportKind.LoRa), state.relayNodes.single().transports)
-            assertEquals(Reach.Relay, state.relayNodes.single().reach)
+            assertEquals(listOf("moto"), state.longRangeNodes.map { it.nodeId })
+            assertEquals(setOf(TransportKind.LoRa), state.longRangeNodes.single().transports)
+            assertEquals(Reach.LongRange, state.longRangeNodes.single().reach)
             assertEquals("nobody is left over", 0, state.knownTotal)
             job.cancel()
         }
@@ -415,13 +416,64 @@ class DiagnosticsViewModelTest {
             runCurrent()
 
             val state = vm.state.value
-            assertEquals(listOf("live"), state.relayNodes.map { it.nodeId })
-            assertTrue("tagged as the Internet plane, which is not a transport at all", state.relayNodes.single().viaSpool)
+            assertEquals(listOf("live"), state.longRangeNodes.map { it.nodeId })
+            assertTrue("tagged as the Internet plane, which is not a transport at all", state.longRangeNodes.single().viaSpool)
             assertEquals(
                 "everyone else is known but not reachable, newest profile first",
                 listOf("dark", "stale", "retired"),
                 state.knownNodes.map { it.nodeId },
             )
+            job.cancel()
+        }
+
+    /**
+     * The field report this answers: an iPhone two hops out was getting DMs through two Pixels, its receipts
+     * coming back the same way, and Diagnostics listed it nowhere but Known. A peer another phone relayed is
+     * Indirect, named by the neighbour that last handed us its frame — and a radio sighting still outranks it,
+     * and it outranks a long-range plane.
+     */
+    @Test
+    fun aPeerAnotherPhoneRelayedIsIndirectAndNamesItsHop() =
+        runTest {
+            val controller = FakeMeshController()
+            controller.neighbors.value = setOf(Peer("alex"))
+            controller.reachable.value = setOf(Peer("alex"), Peer("bea"))
+            controller.peerTransports.value =
+                mapOf("alex" to setOf(TransportKind.Bluetooth), "bea" to setOf(TransportKind.LoRa))
+            controller.heardIndirectly.value =
+                mapOf(
+                    "iphone" to RelayedHeard(heardAt = NOW - 60_000L, via = "alex"),
+                    // Also heard over LoRa: the radio mesh is the better evidence.
+                    "bea" to RelayedHeard(heardAt = NOW - 1_000L, via = "alex"),
+                    // A radio of ours sees Alex itself: Direct wins over a relayed copy of its frame.
+                    "alex" to RelayedHeard(heardAt = NOW, via = "kai"),
+                    // Heard, but longer ago than the linger: the sweep has not run yet, the read still ages it out.
+                    "quiet" to RelayedHeard(heardAt = NOW - PRESENCE_LINGER_MS - 1, via = "alex"),
+                )
+            val vm =
+                reachVm(
+                    controller,
+                    listOf(
+                        peer("alex", "Alex", 900L),
+                        peer("iphone", "iPhone", 800L),
+                        peer("bea", "Bea", 700L),
+                        peer("quiet", "Quiet", 600L),
+                    ),
+                )
+            val job = backgroundScope.launch { vm.state.collect { } }
+            runCurrent()
+
+            val state = vm.state.value
+            assertEquals(listOf("alex"), state.directNodes.map { it.nodeId })
+            assertEquals(listOf("bea", "iphone"), state.indirectNodes.map { it.nodeId })
+            assertEquals("named by its hop's label, not its node id", "Alex", state.indirectNodes.last().via)
+            assertTrue(
+                "an indirect row claims no plane: BLE/NAN would read as its own radio",
+                state.indirectNodes.all { it.transports.isEmpty() && !it.viaSpool },
+            )
+            assertEquals(null, state.directNodes.single().via)
+            assertTrue(state.longRangeNodes.isEmpty())
+            assertEquals(listOf("quiet"), state.knownNodes.map { it.nodeId })
             job.cancel()
         }
 

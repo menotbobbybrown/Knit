@@ -53,6 +53,7 @@ import app.getknit.knit.mesh.bluetooth.CodedPhyDiag
 import app.getknit.knit.mesh.bluetooth.CodedPhyMode
 import app.getknit.knit.mesh.bluetooth.PhyTuning
 import app.getknit.knit.mesh.bluetooth.PromotionConfig
+import app.getknit.knit.mesh.indirectPeers
 import app.getknit.knit.mesh.lora.BoardOwner
 import app.getknit.knit.mesh.lora.BoardSettings
 import app.getknit.knit.mesh.lora.ProvisionMode
@@ -789,6 +790,21 @@ class DebugBridgeReceiver :
             reachable.put(JSONObject().put("nodeId", peer.nodeId).put("name", nameByNode[peer.nodeId] ?: ""))
         }
 
+        // The radio mesh's indirect reach (ADR 2026-10.fw8g): authors another phone handed us a fresh frame from,
+        // within the linger, with that phone and how long ago — the oracle for Diagnostics' "Reachable indirectly".
+        val now = System.currentTimeMillis()
+        val heard = mesh.heardIndirectly.value
+        val indirect = JSONArray()
+        indirectPeers(heard, now).forEach { (nodeId, via) ->
+            indirect.put(
+                JSONObject()
+                    .put("nodeId", nodeId)
+                    .put("name", nameByNode[nodeId] ?: "")
+                    .put("via", via)
+                    .put("agoMs", now - heard.getValue(nodeId).heardAt),
+            )
+        }
+
         // Ephemeral "who's typing" state (conversationId -> [senderNodeId, …]), so a receiver can be polled
         // headlessly to confirm a best-effort typing cue landed — the indicator itself is UI-only/transient.
         val typing = JSONObject()
@@ -824,6 +840,7 @@ class DebugBridgeReceiver :
                 // False after the notification's Stop: KnitApp and BootReceiver then start nothing until Start.
                 .put("meshEnabled", meshEnabled)
                 .put("reachable", reachable)
+                .put("indirect", indirect)
                 .put("typing", typing)
                 .put("metrics", metricsJson(metrics.snapshot()))
 

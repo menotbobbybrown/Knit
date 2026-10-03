@@ -14,12 +14,14 @@ import app.getknit.knit.identity.displayNameFor
 import app.getknit.knit.mesh.MeshController
 import app.getknit.knit.mesh.MeshMetrics
 import app.getknit.knit.mesh.RadioSupport
+import app.getknit.knit.mesh.RelayedHeard
 import app.getknit.knit.mesh.TransportHealth
 import app.getknit.knit.mesh.TransportKind
 import app.getknit.knit.mesh.TransportStatus
 import app.getknit.knit.mesh.bluetooth.CodedPhyDiag
 import app.getknit.knit.mesh.bluetooth.CodedPhyMode
 import app.getknit.knit.mesh.bluetooth.LinkPhy
+import app.getknit.knit.mesh.indirectPeers
 import app.getknit.knit.mesh.lora.LoraFacts
 import app.getknit.knit.mesh.lora.LoraPlane
 import app.getknit.knit.mesh.spool.SpoolStatus
@@ -52,20 +54,24 @@ data class NodeInfo(
     val profileUpdatedAt: Long?,
     /**
      * The planes this row is claiming, already narrowed to what its [reach] can honestly show: short-range
-     * radios (BLE/NAN) on a [Reach.Direct] row, long-range ones (LoRa) on a [Reach.Relay] row, empty
-     * otherwise. Never mixed — a LoRa tag beside BLE·NAN read as "this peer has a board" when it only ever
-     * meant "somebody's board carried its frames".
+     * radios (BLE/NAN) on a [Reach.Direct] row, long-range ones (LoRa) on a [Reach.LongRange] row, empty
+     * otherwise; an [Reach.Indirect] row names its [via] instead, since a BLE/NAN tag reads as "its own radio".
+     * Never mixed — a LoRa tag beside BLE·NAN read as "this peer has a board" when it only ever meant
+     * "somebody's board carried its frames".
      */
     val transports: Set<TransportKind> = emptySet(),
     /** Reached over the Internet plane: this peer put something recent into a scope we share on a spool. */
     val viaSpool: Boolean = false,
+    /** The neighbour that last handed us this peer's frame, as a display label; set on [Reach.Indirect] rows only. */
+    val via: String? = null,
 )
 
 data class DiagnosticsUiState(
     val myNodeId: String = "",
     val myName: String = "",
     val directNodes: List<NodeInfo> = emptyList(),
-    val relayNodes: List<NodeInfo> = emptyList(),
+    val indirectNodes: List<NodeInfo> = emptyList(),
+    val longRangeNodes: List<NodeInfo> = emptyList(),
     /** The [Reach.Known] remainder, newest profile first and capped at [DiagnosticsViewModel.KNOWN_LIMIT]. */
     val knownNodes: List<NodeInfo> = emptyList(),
     /** How many [Reach.Known] nodes there are in total, so the screen can say how many it left out. */
@@ -87,17 +93,20 @@ private data class DiagExtras(
     val spools: List<SpoolStatus>,
     val reachable: Set<String>,
     val loraPlane: LoraPlane,
+    // Raw radio-mesh relay stamps; the linger is applied in [DiagnosticsViewModel.state] with the clock.
+    val heardIndirectly: Map<String, RelayedHeard>,
 )
 
 /**
- * Backs the read-only Diagnostics screen. Sorts the known nodes into the three [Reach] tiers, each from
+ * Backs the read-only Diagnostics screen. Sorts the known nodes into the four [Reach] tiers, each from
  * a *current* signal rather than from what is left over: [Reach.Direct] is
  * [MeshController.neighbors] (the short-range planes, the only ones that sight the peer's own radio),
- * [Reach.Relay] is the rest of [MeshController.reachable] plus any spool scope whose peer has recently
- * pushed to it, and
+ * [Reach.Indirect] is [MeshController.heardIndirectly] within its linger (another phone handed us the peer's
+ * own recent frame), [Reach.LongRange] is the rest of [MeshController.reachable] plus any spool scope whose
+ * peer has recently pushed to it, and
  * [Reach.Known] is the remainder of the peer table, capped. The mesh is a pure flood network with no
  * routing table, so no tier claims a *route* — only that something reached us from that node, or could
- * carry a frame back — and the relay tier deliberately says nothing about how many hops away it is.
+ * carry a frame back — and neither the indirect nor the long-range tier says how many hops away it is.
  *
  * [MeshMetrics] has no reactive stream, so it's polled on a [REFRESH_MS] timer.
  */
@@ -252,17 +261,21 @@ class DiagnosticsViewModel(
             }
         }
 
-    // Metrics + per-transport status + per-peer transport map + the full reach set + the LoRa plane,
-    // pre-combined so the main [state] combine stays within its five-source limit. The reach set and the
-    // LoRa plane pair up first for the same reason: this combine is at that limit too.
+    // Metrics + per-transport status + per-peer transport map + the full reach set + the LoRa plane + the
+    // radio mesh's relay stamps, pre-combined so the main [state] combine stays within its five-source limit.
+    // The last three group first for the same reason: this combine is at that limit too.
     private val extras: Flow<DiagExtras> =
         combine(
             metricsTicker,
             meshManager.transportStatuses,
             meshManager.peerTransports,
             relayStatus.statuses,
-            combine(meshManager.reachable, loraFacts.map { it.plane }.distinctUntilChanged()) { r, l -> r to l },
-        ) { snapshot, statuses, peerTransports, spools, (reachable, loraPlane) ->
+            combine(
+                meshManager.reachable,
+                loraFacts.map { it.plane }.distinctUntilChanged(),
+                meshManager.heardIndirectly,
+            ) { r, l, h -> Triple(r, l, h) },
+        ) { snapshot, statuses, peerTransports, spools, (reachable, loraPlane, heard) ->
             DiagExtras(
                 snapshot,
                 statuses,
@@ -270,6 +283,7 @@ class DiagnosticsViewModel(
                 spools,
                 reachable.mapTo(mutableSetOf()) { it.nodeId },
                 loraPlane,
+                heard,
             )
         }
 
@@ -286,7 +300,10 @@ class DiagnosticsViewModel(
             // `nearby` is folded in as well as `reachable` even though it is a subset of it in the transport:
             // the two arrive here on separate flows, so a peer can briefly be in one and not the other, and a
             // node that dropped out of the list for a frame would flicker the whole section.
-            val nodeIds = (directory.peers.map { it.nodeId } + extra.reachable + nearby).toSet() - setOfNotNull(me)
+            // Read at the refresh tick's clock, like the spool stamps below, so a relayed author ages out on time.
+            val indirect = indirectPeers(extra.heardIndirectly, clock())
+            val nodeIds =
+                (directory.peers.map { it.nodeId } + extra.reachable + nearby + indirect.keys).toSet() - setOfNotNull(me)
             // The Internet plane (ADR 019) is a path to a peer only when that peer has *itself* put
             // something recent into the scope — the rule is [spoolPresentPeers], shared with the Profile
             // status line so the two screens cannot disagree about who is reachable (ADR 2026-09.2ajk).
@@ -295,7 +312,7 @@ class DiagnosticsViewModel(
                 nodeIds.map { id ->
                     val planes = extra.peerTransports[id].orEmpty()
                     val spooled = id in viaSpool
-                    val reach = reachOf(id, nearby, extra.reachable, viaSpool)
+                    val reach = reachOf(id, nearby, indirect.keys, extra.reachable, viaSpool)
                     NodeInfo(
                         nodeId = id,
                         displayName = directory.label(id).text,
@@ -307,10 +324,12 @@ class DiagnosticsViewModel(
                         transports =
                             when (reach) {
                                 Reach.Direct -> planes.intersect(meshManager.shortRangeKinds)
-                                Reach.Relay -> planes - meshManager.shortRangeKinds
+                                Reach.Indirect -> emptySet()
+                                Reach.LongRange -> planes - meshManager.shortRangeKinds
                                 Reach.Known -> emptySet()
                             },
-                        viaSpool = spooled && reach == Reach.Relay,
+                        viaSpool = spooled && reach == Reach.LongRange,
+                        via = indirect[id]?.takeIf { reach == Reach.Indirect }?.let { directory.label(it).text },
                     )
                 }
             val known = nodes.filter { it.reach == Reach.Known }.sortedWith(NEWEST_PROFILE_FIRST)
@@ -318,7 +337,8 @@ class DiagnosticsViewModel(
                 myNodeId = me.orEmpty(),
                 myName = displayNameFor(myName, me.orEmpty()),
                 directNodes = nodes.filter { it.reach == Reach.Direct }.sortedBy { it.displayName.lowercase() },
-                relayNodes = nodes.filter { it.reach == Reach.Relay }.sortedBy { it.displayName.lowercase() },
+                indirectNodes = nodes.filter { it.reach == Reach.Indirect }.sortedBy { it.displayName.lowercase() },
+                longRangeNodes = nodes.filter { it.reach == Reach.LongRange }.sortedBy { it.displayName.lowercase() },
                 knownNodes = known.take(KNOWN_LIMIT),
                 knownTotal = known.size,
                 metrics = extra.metrics,
