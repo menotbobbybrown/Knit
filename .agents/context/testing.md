@@ -297,7 +297,10 @@ hop (fixed in `MeshRouter.countOverheard`, pinned by `MeshRouterTest`).
   a relay of an earlier frame still in its jitter when the baseline was read lands inside the count. Wait on
   the store instead (`CustodyQuotaLabTest.awaitCustody`: custody holding exactly the newest frames), and re-link
   with the air losing the carrier's relays (`connect(…, lossy = { it.hops > 0 })`). What the newcomer must get
-  then crosses as a custody serve, re-wrapped at hop 0, on the next digest exchange.
+  then crosses as a custody serve, re-wrapped at hop 0, on the next digest exchange. When a late relay must
+  only come *after* something rather than never, hold the pipe inside the link instead
+  (`MeshLab.link(a, b) { a.transport.hold(b.transport) }`: `arm` runs before either end lists the link, so
+  no relay can name the peer ahead of the hold); `CustodyLabTest`'s receipt-first walk uses both shapes.
 - **First contact by board alone is minutes, not seconds**: a passive gateway fans nothing, a superseded
   profile fan-out is dropped when the election flips, and the bridge budget (`BRIDGE_SHARE` of the 15-min
   window) serves about one profile per window per gateway. LoRa scenarios meet everyone by radio first

@@ -110,31 +110,27 @@ class CustodyLabTest {
             lab.await(1) { if (dm in dave.custodyIds()) 1 else 0 }
             lab.unlink(alice, dave)
 
-            // Bob delivers it, and his receipt purges his copy and Dave's. His relay of the DM fires here, while Dave
-            // is his only link, so it cannot reach Carol ahead of the receipt.
-            val bobRelayed = bob.metrics.frames().framesRelayed
+            // Bob delivers it, and his receipt purges his copy and Dave's.
             lab.link(dave, bob)
             lab.await(1) {
                 val delivered = bob.decrypted(bob.dmWith(alice)).isNotEmpty()
                 if (delivered && dm !in bob.custodyIds() && dm !in dave.custodyIds()) 1 else 0
             }
-            lab.await(1) { (bob.metrics.frames().framesRelayed - bobRelayed).toInt() }
             lab.unlink(dave, bob)
 
-            // Carol takes the receipt from Bob's custody, then meets Alice with it — once her own relay of it has fired,
-            // so it cannot slip to Alice past the hold below.
-            val carolRelayed = carol.metrics.frames().framesRelayed
-            lab.link(bob, carol)
+            // Carol takes the receipt from Bob's custody, then meets Alice with it. Bob's relay of the DM reads its
+            // targets after the router's jitter, which can run out after this link (no count of his relays says it
+            // has not), so the air loses his relays toward Carol: the DM cannot reach her ahead of the receipt, and
+            // the receipt crosses as a custody serve at hop 0. The link is down again before anyone sends toward
+            // Carol, so nothing later needs his relays over it.
+            bob.transport.connect(carol.transport, lossy = { it.hops > 0 })
             lab.awaitCustodyParity(bob, carol)
-            lab.await(1) { (carol.metrics.frames().framesRelayed - carolRelayed).toInt() }
             lab.unlink(bob, carol)
-            // Carol's frames to Alice are held, digests excepted: Alice serves the DM on Carol's digest before she can
-            // hear the receipt. The serve landing on Carol, and her router finishing it, is what says she handled it —
-            // not her relay count, which her own leftover relay of the receipt can move first.
-            carol.transport.connect(alice.transport, publish = false)
-            carol.transport.hold(alice.transport)
-            carol.transport.publishNeighbors()
-            alice.transport.publishNeighbors()
+            // Carol's frames to Alice are held from the link's first frame, digests excepted: Alice serves the DM on
+            // Carol's digest before she can hear the receipt, and Carol's own relay of the receipt, however late its
+            // jitter runs out, parks behind the hold. The serve landing on Carol, and her router finishing it, is what
+            // says she handled it.
+            lab.link(carol, alice) { carol.transport.hold(alice.transport) }
             lab.await(1) {
                 // Each line reads "#seq <receiver> <type> <id> …"; Alice's earlier send to Dave is already in the log.
                 alice.transport.sent.count { line ->

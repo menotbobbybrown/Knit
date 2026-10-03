@@ -192,7 +192,7 @@ class AttachmentLabTest {
 
     /**
      * The row is the want: Bob dies while his pull of the new photo is stuck, and no group frame reaches him
-     * after the relaunch (Carol's relay of the update is waited out first). The database re-arm
+     * after the relaunch (the relink loses Carol's relays toward him). The database re-arm
      * (`MeshManager.rewantMissingBlobs`) still asks for the photo he decided on and does not show, and it lands.
      */
     @Test
@@ -205,28 +205,27 @@ class AttachmentLabTest {
 
             alice.transport.holdFiles(bob.transport)
             carol.transport.holdFiles(bob.transport)
-            val decided = carol.metrics.snapshot().let { it.frames.framesRelayed + it.frames.framesSuppressed }
             val photo = Random(8).nextBytes(4_096)
             val hash = sha256Hex(photo)
             alice.setGroupPhoto(groupId, photo)
             lab.await(1) { if (bob.group(groupId)?.photoHash == hash) 1 else 0 }
             assertEquals(null, bob.group(groupId)?.photoShownHash)
-            // Carol's relay of Alice's update reads its targets after the router's jitter; decided before Bob goes
-            // down, it cannot reach the relaunched Bob, whose empty seen set would take it and re-arm the pull on
-            // the frame path — the path this scenario must keep out.
-            lab.await((decided + 1).toInt()) {
-                carol.metrics
-                    .snapshot()
-                    .let { it.frames.framesRelayed + it.frames.framesSuppressed }
-                    .toInt()
-            }
+            // Carol's own pull lands first: a want still open at the relink would re-ask the newcomer Bob, and his
+            // answer to that ask (`want` on a hash he lacks) would land the photo without the database re-arm.
+            awaitShown(groupId, hash, carol)
 
             bob.restart()
             // Alice (always) and Carol (when her copy landed before Bob's ask) served onto the held pipe, and a
             // holder refuses the same (hash, peer) for SERVE_MEMO_MS — a memo Bob's restart does not clear. Past
             // it, the relink's newcomer re-ask is the first one either can answer.
             lab.clock.advance(BlobExchange.SERVE_MEMO_MS)
-            lab.linkAll(alice to bob, bob to carol)
+            // Carol's relay of Alice's update reads its targets after the router's jitter, which can run out after
+            // this relink, and the relaunched Bob's empty seen set would take it and re-arm the pull on the frame
+            // path — the path this scenario must keep out. So the air loses Carol's relays toward him. His custody
+            // took the update with his row, so no serve brings it either, and what else he needs reaches him direct.
+            alice.transport.connect(bob.transport, publish = false)
+            carol.transport.connect(bob.transport, publish = false, lossy = { it.hops > 0 })
+            listOf(alice, bob, carol).forEach { it.transport.publishNeighbors() }
             awaitShown(groupId, hash, bob)
             assertTrue(photo.contentEquals(bob.blobs.bytes(hash)))
             lab.assertConverged(listOf(alice, bob, carol), atLeast = 1) { groupId }
