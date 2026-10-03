@@ -62,8 +62,8 @@ is out: it must stay legacy for legacy-only scanners and the 31-byte budget.
 - **Advertising sets.** Up to five (presence, two side slots, the watch, Coded). A refused Coded start leaves it
   dark until the next bring-up (`bt coded advert dark <status>`, `bleCodedAdvertDark`); nothing else depends on it.
 - **Throughput.** A link held on S=8 moves about a fifth of 1M. Blobs still prefer Wi-Fi Aware past
-  `BULK_MIN_BYTES`, and `BLE_PACE_BYTES_PER_SEC` (28 KiB/s) sits above S=8's rate, so a blob on a Coded link
-  fills the stack's queue: measure chat latency behind a blob on CODED before the flag flips.
+  `BULK_MIN_BYTES`. A file on a Coded link is fed at its own pace so chat is not queued behind it (the 2026-10-03
+  amendment, #114).
 - **The 12 dB credit and the step thresholds are guesses** sized from one spike. `…debug.PHY` overrides the
   thresholds on a debug build; the credit is a constant.
 - **Reachable at Coded range.** A peer sighted on Coded counts as nearby (`reachable ⊇ neighbors` holds, since a
@@ -310,3 +310,48 @@ nothing about the link's own margin.
 Tests: `CodedPhyPolicyTest`, which covers the fast hold, the slow band waiting 30 s, a dip under −62 falling back to
 the slow hold, the fast tier inside the minimum gap, and the band each read reports. A walk back into range is still
 owed. It should measure the time from `step-up hold fast` to `CODED→`, against the 40 s above.
+
+## Amendment 2026-10-03 — a file on a Coded link is fed at Coded's pace
+
+**What was observed (#114).** On the 2026-10-02 walk the P9 served a 203,807 B photo to the P8 over a link on Coded
+since 20:13:08, read at −75 or weaker. The P9 logged `file ATTACHMENT/3af731f5… 203807B in 7110ms`: the whole file
+reached the stack at `BLE_PACE_BYTES_PER_SEC`, 28 KiB/s. The P8's side scan saw the stream from 20:18:06 to 20:21:00,
+and it served the photo onward at 20:21:15. The link drained about 1.1 KB/s, so the photo took about 3 min to cross,
+and a message sent after it waited behind it in the stack's queue. The pace keeps that queue shallow only while it
+sits under what the air drains, and 28 KiB/s is sized for 1M and 2M.
+
+**What changed.**
+
+- `FramedLink` reads its pace (`PaceConfig`: a rate and a chunk size) before every chunk, from a supplier the
+  transport passes. Wi-Fi Aware passes none and stays unbounded.
+- `CodedPhyPolicy.pace` gives a link last read on Coded 1 KiB/s in 2 KiB chunks (`PhyTuning.codedPaceBytesPerSec` /
+  `codedChunkBytes`). Any other PHY, or a link not yet read, keeps 28 KiB/s in 16 KiB chunks. A frame queued
+  mid-file now waits about one 2 KiB chunk on the feed side.
+- A pace that changes mid-file restarts the pace's clock and byte count (`PaceWindow`). An average since the file
+  began would owe nothing for seconds after a step down, while the slower air backed up, and would hold the feed
+  after a step up to pay off the slow stretch.
+- The transport keeps the PHY each link was last read on past its handle (`linkPhy`). Mode OFF lets the handles go
+  and leaves a Coded link on Coded, so its files keep Coded's pace.
+- `…debug.PHY` sets the two fields with `--ei codedPace N` and `--ei codedChunk N`, and the `file … in …ms` line
+  carries the pace it ended on (`@1024`).
+
+Nothing changes on the wire: a receiver takes any record up to `MAX_PAYLOAD_BYTES`, and the chunk size was never
+part of the contract.
+
+**What it costs.** At the edge a photo takes about as long as before, since the air is the bottleneck. On a Coded
+link at closer range, where S=8 drains faster than 1 KiB/s, a photo is two to three times slower.
+
+**Not taken.**
+
+- Never starting a file on a Coded link, and letting the receiver ask again once the link steps up or Wi-Fi Aware
+  links (ADR 2026-09.4tx5's fresh ask). Chat would stay live, but a photo would never cross at Coded range.
+- Pacing by the link's smoothed RSSI. It would adapt to the edge, but no RSSI-to-throughput curve has been measured,
+  and the guesses would sit in a hot path.
+- Receiver flow control (windowed chunk acks in `LinkFraming`). It bounds the queue on every PHY, but it is a wire
+  change both platforms must speak.
+
+Tests: `TransferPacePolicyTest` (the Coded rate, and the window restarting on a change, both ways),
+`CodedPhyPolicyTest` (`pace` per PHY, tunable, chunk capped), and `FramedLinkTest` (a frame queued mid-file behind
+2 KiB chunks waits a chunk, not the file; a pace change takes the next chunk). A desk trial is owed: `mode coded`, a
+~200 KB image then a text, the text's arrival timed on the receiver against the same run in `auto`. A walk at the
+edge is owed after it.

@@ -287,14 +287,16 @@ carries `-f 0x20` (`FLAG_INCLUDE_STOPPED_PACKAGES`); `scripts/bridge.sh` always 
   N` / `stepUp` / `stepDownReads` / `minGapMs` / `stepUpHoldMs` / `stepUpFast` / `stepUpFastHoldMs` (the fast step-up
   tier, −62 held 10 s) override the step thresholds and `--ei credit N` the
   dB a Coded advert reading gains on the 1M scale (default 12, what every −90 floor reads), and `--ei fastAdvertMs N`
-  / `fastHoldMs N` the Coded advert's interval after a link at range drops (250) and how long it holds (180000),
-  until the process dies (`--ez resetTuning true` restores them); no extras reads. The reply: `mode`, `supported`
+  / `fastHoldMs N` the Coded advert's interval after a link at range drops (250) and how long it holds (180000), and
+  `--ei codedPace N` / `codedChunk N` a file's feed rate in B/s (1024; 0 unbounded) and chunk (2048, capped at 16384)
+  on a link on Coded (#114), until the process dies (`--ez resetTuning true` restores them); no extras reads. The reply: `mode`, `supported`
   (the controller has Coded and extended advertising), `advert` (`off` / `starting` / `live` / `refused <status>` /
   `retrying` / `dark <status>`), `txPower`, `tuning`,
   `links[]` (`nodeId`, `phy` ONE_M|TWO_M|CODED|UNKNOWN, `linkRssi`, `drives`, `attached`, `switches`, `gaveUp`) and
   `peers[]` (`nodeId`, `rssi` on the 1M scale, `oneMSeenAgoMs`, `codedSeenAgoMs`, each PHY's own `rssi1m` /
   `rssiCoded`, and `codedLagMs`: the 1M listening its Coded hits outlast its 1M ones by, over 8000 meaning Coded alone). Oracle for a step: `links[].phy` plus `bt phy <id> ONE_M→CODED` in logcat (and the PHY chip on the
-  Diagnostics row). A walk's record is logcat: `bt coded heard <id> hits=… rssi=a..b 1m=… eff=… dwell=… promotable=…
+  Diagnostics row). Oracle for a file's pace: `file …/… <N>B in <ms>ms @<B/s> → <id>` on the sender (`@1024` on
+  Coded, `@28672` otherwise). A walk's record is logcat: `bt coded heard <id> hits=… rssi=a..b 1m=… eff=… dwell=… promotable=…
   dials=…` once a minute per unlinked peer heard on Coded, `bt scan coded windows on|off`, `bt refused client … codedOnly=`,
   `bt initiating to … via=coded`, `bt phy <id> step-up hold none|slow|fast (rssi=…)` as a Coded link's smoothed RSSI
   crosses −72 / −62, and at a drop `bt phy <id> link dropped on <PHY> rssi=… (<reason>)` then

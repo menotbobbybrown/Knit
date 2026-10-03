@@ -1,5 +1,7 @@
 package app.getknit.knit.mesh.bluetooth
 
+import app.getknit.knit.mesh.link.LinkFraming
+import app.getknit.knit.mesh.link.PaceConfig
 import kotlin.math.roundToInt
 
 /**
@@ -76,6 +78,12 @@ data class PhyTuning(
     val fastAdvertMs: Int = 250,
     /** How long a drop at range keeps the Coded advert fast, unless the peer links again first. */
     val fastHoldMs: Long = 180_000,
+    /**
+     * A file's feed rate and chunk on a link on Coded ([CodedPhyPolicy.pace], #114): about what S=8 drained at the edge
+     * of the 2026-10-02 walk (~1.1 KB/s), so a frame queued behind a file waits about one chunk, not the file.
+     */
+    val codedPaceBytesPerSec: Int = 1024,
+    val codedChunkBytes: Int = 2048,
 ) {
     private companion object {
         // Negative defaults can't be inlined without tripping MagicNumber (as PromotionConfig's floor).
@@ -205,6 +213,33 @@ object CodedPhyPolicy {
             !codedOn -> ScanPhys.ONE_M
             (alone || codedOnlyUnlinked) && !lastWasCoded -> ScanPhys.CODED
             else -> ScanPhys.ALL
+        }
+
+    /**
+     * Average file-feed cap on an L2CAP CoC link on 1M or 2M (NAN stays unbounded). A blob otherwise bursts into the
+     * BT-stack TX queue ahead of any later text frame and saturates the ACL, so chat stalls until the transfer completes
+     * and the reverse direction is starved. Holding the feed BELOW real L2CAP throughput keeps that queue shallow, so
+     * interleaved frames reach the wire promptly and reverse traffic gets connection-event budget. Deliberately
+     * conservative — the transfer is a bit slower in exchange for live chat. Field-tune against the
+     * `file …/… <N>B in <ms>ms @<pace>` timing (FramedLink).
+     */
+    const val BLE_PACE_BYTES_PER_SEC = 28 * 1024
+
+    /**
+     * The pace a file is fed to a Bluetooth link at, by the PHY the link was last read on. [BLE_PACE_BYTES_PER_SEC] is
+     * sized for 1M/2M; a link on Coded S=8 drains far slower, and at that pace a whole photo reached the stack in
+     * seconds and every frame after it waited minutes behind it (#114). So Coded takes [PhyTuning.codedPaceBytesPerSec]
+     * in [PhyTuning.codedChunkBytes] chunks. A link not yet read (or with no PHY handle: the experiment off) keeps the
+     * 1M pace.
+     */
+    fun pace(
+        phy: LinkPhy,
+        tuning: PhyTuning,
+    ): PaceConfig =
+        if (phy == LinkPhy.CODED) {
+            PaceConfig(tuning.codedPaceBytesPerSec, tuning.codedChunkBytes.coerceIn(1, LinkFraming.FILE_CHUNK_BYTES))
+        } else {
+            PaceConfig(BLE_PACE_BYTES_PER_SEC, LinkFraming.FILE_CHUNK_BYTES)
         }
 
     /** Which side of a link drives its PHY: the larger node id, the side that dials. The other only watches. */

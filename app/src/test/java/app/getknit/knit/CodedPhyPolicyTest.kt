@@ -10,6 +10,8 @@ import app.getknit.knit.mesh.bluetooth.PhyStepper.StepUpHold
 import app.getknit.knit.mesh.bluetooth.PhyTuning
 import app.getknit.knit.mesh.bluetooth.PromotionPolicy
 import app.getknit.knit.mesh.bluetooth.ScanPhys
+import app.getknit.knit.mesh.link.LinkFraming
+import app.getknit.knit.mesh.link.PaceConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -485,5 +487,25 @@ class CodedPhyPolicyTest {
     fun modesRoundTripTheirSpelling() {
         CodedPhyMode.entries.forEach { assertEquals(it, CodedPhyMode.parse(it.wire)) }
         assertNull(CodedPhyMode.parse("long"))
+    }
+
+    @Test
+    fun aFileOnACodedLinkIsFedAtTheCodedPaceInSmallChunks() {
+        // #114: 28 KiB/s handed a 200 KB photo to a Coded link's stack in 7 s, and the text after it waited 3 min.
+        assertEquals(PaceConfig(1024, 2048), CodedPhyPolicy.pace(LinkPhy.CODED, tuning))
+    }
+
+    @Test
+    fun everyOtherPhyKeepsTheOneMPace() {
+        val oneM = PaceConfig(CodedPhyPolicy.BLE_PACE_BYTES_PER_SEC, LinkFraming.FILE_CHUNK_BYTES)
+        for (phy in listOf(LinkPhy.ONE_M, LinkPhy.TWO_M, LinkPhy.UNKNOWN)) {
+            assertEquals("$phy", oneM, CodedPhyPolicy.pace(phy, tuning))
+        }
+    }
+
+    @Test
+    fun theCodedPaceIsTunableAndItsChunkCappedAtTheCodecs() {
+        val tuned = tuning.copy(codedPaceBytesPerSec = 512, codedChunkBytes = 1 shl 20)
+        assertEquals(PaceConfig(512, LinkFraming.FILE_CHUNK_BYTES), CodedPhyPolicy.pace(LinkPhy.CODED, tuned))
     }
 }

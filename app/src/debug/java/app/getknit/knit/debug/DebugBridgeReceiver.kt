@@ -54,6 +54,7 @@ import app.getknit.knit.mesh.bluetooth.CodedPhyMode
 import app.getknit.knit.mesh.bluetooth.PhyTuning
 import app.getknit.knit.mesh.bluetooth.PromotionConfig
 import app.getknit.knit.mesh.indirectPeers
+import app.getknit.knit.mesh.link.LinkFraming
 import app.getknit.knit.mesh.lora.BoardOwner
 import app.getknit.knit.mesh.lora.BoardSettings
 import app.getknit.knit.mesh.lora.ProvisionMode
@@ -2131,6 +2132,8 @@ class DebugBridgeReceiver :
                 codedCreditDb = int("credit")?.toDouble() ?: t.codedCreditDb,
                 fastAdvertMs = int("fastAdvertMs") ?: t.fastAdvertMs,
                 fastHoldMs = int("fastHoldMs")?.toLong() ?: t.fastHoldMs,
+                codedPaceBytesPerSec = int("codedPace") ?: t.codedPaceBytesPerSec,
+                codedChunkBytes = int("codedChunk")?.coerceIn(1, LinkFraming.FILE_CHUNK_BYTES) ?: t.codedChunkBytes,
             )
         delay(PHY_SETTLE_MS) // the transport collects the stored mode; let it land before reading the status back
         val status = CodedPhyDiag.status?.invoke() ?: return reply("error", "Bluetooth transport is not running")
@@ -2153,7 +2156,9 @@ class DebugBridgeReceiver :
                     .put("minGapMs", tuned.minSwitchGapMs)
                     .put("credit", tuned.codedCreditDb.toInt())
                     .put("fastAdvertMs", tuned.fastAdvertMs)
-                    .put("fastHoldMs", tuned.fastHoldMs),
+                    .put("fastHoldMs", tuned.fastHoldMs)
+                    .put("codedPace", tuned.codedPaceBytesPerSec)
+                    .put("codedChunk", tuned.codedChunkBytes),
             ).put(
                 "links",
                 JSONArray(

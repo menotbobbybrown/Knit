@@ -63,9 +63,10 @@ class FramedLink(
     private val metrics: MeshMetrics,
     private val callbacks: LinkCallbacks,
     private val now: () -> Long,
-    // Average file-feed cap in bytes/sec for a slow shared channel (BLE L2CAP); ≤ 0 = unbounded (Wi-Fi Aware
-    // NDP, and the default so existing callers/tests are unchanged). See [TransferPacePolicy] for the why.
-    private val paceBytesPerSec: Int = 0,
+    // The file feed's pace for a slow shared channel (BLE L2CAP), read before every chunk so a link that changes
+    // PHY mid-transfer is paced by the one it is on now; unbounded (Wi-Fi Aware NDP, and the default so existing
+    // callers/tests are unchanged). See [TransferPacePolicy] and [PaceWindow] for the why.
+    private val pace: () -> PaceConfig = { PaceConfig() },
     private val log: (String) -> Unit = {},
 ) {
     private val outbound = Channel<Outbound>(Channel.UNLIMITED)
@@ -321,36 +322,36 @@ class FramedLink(
         txInProgress = true // don't let a supervisor tear down mid transfer
         val startedAt = now()
         val bytes = item.file.length()
-        val pace = PaceConfig(paceBytesPerSec)
+        var cfg = PaceConfig() // read before every chunk below; the window rebases onto the first
+        val window = PaceWindow(cfg, startedAt)
         try {
             val header = FileHeaderWire(item.meta.kind.wire, item.meta.key, item.meta.mime)
             LinkFraming.write(out, LinkFraming.Type.FILE_HEADER, LinkFraming.encodeFileHeader(header))
             item.file.inputStream().use { input ->
                 val buf = ByteArray(LinkFraming.FILE_CHUNK_BYTES)
-                var sent = 0L
                 while (true) {
                     // Interleave live frames between chunks — and flush them NOW so they ride the pace gap ahead
                     // of the next chunk instead of trailing behind it in the socket buffer.
                     if (drainFramesInto(out)) out.flush()
-                    val n = input.read(buf)
+                    cfg = pace()
+                    window.rebase(cfg, now())
+                    val n = input.read(buf, 0, cfg.chunkBytes.coerceIn(1, buf.size))
                     if (n == -1) break
                     LinkFraming.write(out, LinkFraming.Type.FILE_CHUNK, if (n == buf.size) buf else buf.copyOf(n))
                     out.flush() // hand the chunk to the stack so the pace below measures real fed bytes
                     touch()
-                    sent += n
                     // On a paced (BLE) link, hold the feed at ~link capacity so the stack TX queue stays shallow:
                     // interleaved frames sit near the wire head and the freed ACL budget carries reverse traffic.
-                    if (paceBytesPerSec > 0) {
-                        val wait = TransferPacePolicy.delayMs(sent, now() - startedAt, pace)
-                        if (wait > 0) delay(wait)
-                    }
+                    val wait = window.fed(n, now())
+                    if (wait > 0) delay(wait)
                 }
             }
             LinkFraming.write(out, LinkFraming.Type.FILE_END)
             out.flush()
             touch()
-            // The per-plane throughput evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets).
-            log("file ${item.meta.kind.wire}/${item.meta.key} ${bytes}B in ${now() - startedAt}ms → $nodeId")
+            // The per-plane throughput evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets), with
+            // the pace the feed ended on (0 = unbounded).
+            log("file ${item.meta.kind.wire}/${item.meta.key} ${bytes}B in ${now() - startedAt}ms @${cfg.bytesPerSec} → $nodeId")
         } finally {
             txInProgress = false
             notePending(item.meta.key, -1)

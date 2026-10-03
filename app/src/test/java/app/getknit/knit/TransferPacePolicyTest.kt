@@ -1,6 +1,7 @@
 package app.getknit.knit
 
 import app.getknit.knit.mesh.link.PaceConfig
+import app.getknit.knit.mesh.link.PaceWindow
 import app.getknit.knit.mesh.link.TransferPacePolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -48,5 +49,46 @@ class TransferPacePolicyTest {
         val cfg = PaceConfig(bytesPerSec = 28 * 1024)
         val wait = TransferPacePolicy.delayMs(bytesSent = 200L * 1024, elapsedMs = 0, config = cfg)
         assertTrue("≈7.15 s hold for a fully-buffered 200 KB feed, was $wait ms", wait in 7000..7500)
+    }
+
+    @Test
+    fun aCodedLinksPaceHoldsEachTwoKibChunkForTwoSeconds() {
+        // #114: a Coded S=8 link drains ~1 KB/s at the edge, so its feed runs at 1 KiB/s in 2 KiB chunks.
+        val coded = PaceConfig(bytesPerSec = 1024, chunkBytes = 2048)
+        val window = PaceWindow(coded, startedAt = 0)
+        assertEquals(2000, window.fed(2048, now = 0))
+        assertEquals(2000, window.fed(2048, now = 2000)) // 4 KiB owes 4 s; 2 s are spent
+    }
+
+    @Test
+    fun aPaceChangeMidTransferRestartsTheWindow() {
+        // 112 KiB fed at 28 KiB/s in no time owes 4 s. The link steps to Coded: the next chunk is charged at the
+        // Coded rate from the step, not on top of the old window's debt.
+        val fast = PaceConfig(bytesPerSec = 28 * 1024)
+        val coded = PaceConfig(bytesPerSec = 1024, chunkBytes = 2048)
+        val window = PaceWindow(fast, startedAt = 0)
+        assertEquals(4000, window.fed(112 * 1024, now = 0))
+        window.rebase(coded, now = 4000)
+        assertEquals(2000, window.fed(2048, now = 4000))
+    }
+
+    @Test
+    fun aStepUpDoesNotPayOffTheSlowStretch() {
+        // 60 s on Coded fed 60 KiB on budget. Stepping up to 28 KiB/s starts a fresh window, so the first fast chunk
+        // owes its own ~571 ms rather than nothing (an average since the file began would let a burst through).
+        val fast = PaceConfig(bytesPerSec = 28 * 1024)
+        val coded = PaceConfig(bytesPerSec = 1024, chunkBytes = 2048)
+        val window = PaceWindow(coded, startedAt = 0)
+        assertEquals(0, window.fed(60 * 1024, now = 60_000))
+        window.rebase(fast, now = 60_000)
+        assertEquals(571, window.fed(16 * 1024, now = 60_000))
+    }
+
+    @Test
+    fun anUnchangedPaceKeepsTheWindowRunning() {
+        val window = PaceWindow(kbps1, startedAt = 0)
+        assertEquals(1000, window.fed(1000, now = 0))
+        window.rebase(PaceConfig(bytesPerSec = 1000), now = 500) // equal config: no restart
+        assertEquals(1500, window.fed(1000, now = 500)) // 2000 ms target − 500 ms elapsed
     }
 }

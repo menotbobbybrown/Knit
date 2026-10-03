@@ -177,6 +177,11 @@ class BluetoothMeshTransport(
 
     // Each link's PHY handle, keyed by link like [doorbells], and its peer's device, which a late handle needs.
     private val phyControls = ConcurrentHashMap<FramedLink, BlePhyControl>()
+
+    // The PHY each link was last read on, kept past its handle: `mode off` lets every handle go but leaves the link on
+    // its PHY (BlePhyControl.close), and a file fed to a link still on Coded must keep Coded's pace (#114). Dropped
+    // with the link.
+    private val linkPhy = ConcurrentHashMap<FramedLink, LinkPhy>()
     private val linkDevices = ConcurrentHashMap<FramedLink, BluetoothDevice>()
 
     // What each unlinked peer's adverts did this minute, logged by [diagLoop] as `bt coded heard` while the experiment
@@ -908,15 +913,21 @@ class BluetoothMeshTransport(
         wake()
     }
 
-    /** Republishes the PHY each handled link is on, for Diagnostics' per-link chip ([CodedPhyDiag.linkPhys]). */
+    /**
+     * Republishes the PHY each handled link is on, for Diagnostics' per-link chip ([CodedPhyDiag.linkPhys]), and notes
+     * it in [linkPhy] for the link's file pace.
+     */
     private fun publishLinkPhys() {
-        CodedPhyDiag.publishLinkPhys(
-            phyControls.values
-                .map(BlePhyControl::status)
-                .filter { it.attached && it.phy != LinkPhy.UNKNOWN }
-                .associate { it.nodeId to it.phy },
-        )
+        val known =
+            phyControls.mapNotNull { (link, control) ->
+                control.status().takeIf { it.attached && it.phy != LinkPhy.UNKNOWN }?.let { link to it }
+            }
+        known.forEach { (link, status) -> if (links[link.nodeId] === link) linkPhy[link] = status.phy }
+        CodedPhyDiag.publishLinkPhys(known.associate { (_, status) -> status.nodeId to status.phy })
     }
+
+    /** The pace a file is fed to [link] at, by the PHY it was last read on (#114, ADR 2026-10.yvn6). */
+    private fun paceFor(link: FramedLink) = CodedPhyPolicy.pace(linkPhy[link] ?: LinkPhy.UNKNOWN, CodedPhyDiag.tuning)
 
     /** Gives [link] a PHY handle if the experiment runs, its peer was heard on Coded, and it has none yet. */
     private fun ensurePhyControl(link: FramedLink) {
@@ -1547,7 +1558,7 @@ class BluetoothMeshTransport(
                 metrics = metrics,
                 callbacks = events,
                 now = SystemClock::elapsedRealtime,
-                paceBytesPerSec = BLE_PACE_BYTES_PER_SEC,
+                pace = { paceFor(events.link) }, // set just below; the writer starts only at framed.start()
                 log = { msg -> Log.d(TAG, msg) },
             )
         events.link = framed
@@ -1562,6 +1573,7 @@ class BluetoothMeshTransport(
             neverSighted.remove(prev)
             linkAddresses.remove(prev)
             linkDevices.remove(prev)
+            linkPhy.remove(prev)
             phyControls.remove(prev)?.close()
             publishLinkPhys()
             doorbells.remove(prev)?.close() // teardownLink(only = prev) will find it replaced and release nothing
@@ -1607,6 +1619,7 @@ class BluetoothMeshTransport(
         neverSighted.remove(fl)
         linkAddresses.remove(fl)
         linkDevices.remove(fl)
+        linkPhy.remove(fl)
         phyControls.remove(fl)?.let { control ->
             notePhyDrop(control.status(), reason)
             control.close()
@@ -2056,14 +2069,6 @@ class BluetoothMeshTransport(
         // Set generously (BLE reaches further than NAN's NDP): broaden BLE reach to the edge of usable range and
         // exclude only genuinely poor signals, rather than gating to same-room proximity.
         private const val PROMOTE_RSSI_FLOOR = -90.0
-
-        // Average byte/sec cap on a file feed over an L2CAP CoC link (passed to FramedLink; NAN stays unbounded).
-        // A blob otherwise bursts into the BT-stack TX queue ahead of any later text frame and saturates the ACL,
-        // so chat stalls until the transfer completes and the reverse direction is starved. Holding the feed
-        // BELOW real L2CAP throughput keeps that queue shallow, so interleaved frames reach the wire promptly and
-        // reverse traffic gets connection-event budget. Deliberately conservative — the transfer is a bit slower
-        // in exchange for live chat. Field-tune against the `file …/… <N>B in <ms>ms` timing (FramedLink).
-        private const val BLE_PACE_BYTES_PER_SEC = 28 * 1024
     }
 }
 

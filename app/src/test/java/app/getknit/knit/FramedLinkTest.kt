@@ -12,6 +12,7 @@ import app.getknit.knit.mesh.link.FramedLink
 import app.getknit.knit.mesh.link.LinkCallbacks
 import app.getknit.knit.mesh.link.LinkFraming
 import app.getknit.knit.mesh.link.LinkSocket
+import app.getknit.knit.mesh.link.PaceConfig
 import app.getknit.knit.mesh.protocol.FrameType
 import app.getknit.knit.mesh.protocol.RelayEnvelope
 import app.getknit.knit.mesh.protocol.WireCodec
@@ -30,12 +31,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.OutputStream
 import java.io.PipedInputStream
 import java.io.PipedOutputStream
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Unit tests for [FramedLink] — the transport-agnostic per-connection read/write/file/digest loops extracted
@@ -89,7 +92,7 @@ class FramedLinkTest {
         nodeId: String = "peer0001",
         // A small out-pipe lets a test force the writer to back-pressure mid-file (see the interleave test).
         fromLinkBuffer: Int = 1 shl 18,
-        paceBytesPerSec: Int = 0,
+        pace: () -> PaceConfig = { PaceConfig() },
         metrics: MeshMetrics = MeshMetrics(),
     ): Harness {
         val toLink = PipedOutputStream()
@@ -117,7 +120,7 @@ class FramedLinkTest {
                 metrics = metrics,
                 callbacks = callbacks,
                 now = { 0L },
-                paceBytesPerSec = paceBytesPerSec,
+                pace = pace,
             )
         link.start()
         return Harness(link, toLink, fromLink, callbacks)
@@ -316,6 +319,75 @@ class FramedLinkTest {
         val endAt = types.indexOf(LinkFraming.Type.FILE_END)
         assertTrue("a FRAME must interleave before FILE_END, saw $types", frameAt in 0 until endAt)
         assertArrayEquals("the interleaved frame's bytes are intact", framePayload, interleaved)
+    }
+
+    @Test
+    fun aSmallChunkPaceKeepsAFrameQueuedMidFileWithinAChunkOrTwo() {
+        // #114: on a Coded link the feed takes 2 KiB chunks, so a frame sent mid-transfer waits behind what the
+        // socket already holds plus one chunk — never a 16 KiB one. The 4 KiB out-pipe holds the writer mid-file
+        // when the frame is enqueued; unbounded rate, so the test runs on the chunk size alone.
+        val h = harness(fromLinkBuffer = 4 * 1024, pace = { PaceConfig(bytesPerSec = 0, chunkBytes = 2048) })
+        val body = ByteArray(80 * 1024) { (it % 251).toByte() }
+        val file = tmp.newFile("coded.bin").apply { writeBytes(body) }
+        val framePayload = frameBytes(id = "live1", senderId = "sender01")
+
+        h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, "d".repeat(64), "image/webp"))
+        h.link.send(framePayload)
+
+        val chunks = ArrayList<Int>()
+        var bodyBeforeFrame: Int? = null
+        val received = ByteArrayOutputStream()
+        var rec = LinkFraming.read(h.fromLink)
+        while (rec != null && rec.type != LinkFraming.Type.FILE_END) {
+            when (rec.type) {
+                LinkFraming.Type.FILE_CHUNK -> {
+                    chunks.add(rec.payload.size)
+                    received.write(rec.payload)
+                }
+
+                LinkFraming.Type.FRAME -> {
+                    if (bodyBeforeFrame == null) bodyBeforeFrame = received.size()
+                }
+
+                else -> {
+                    Unit
+                }
+            }
+            rec = LinkFraming.read(h.fromLink)
+        }
+        assertTrue("every chunk is at most 2 KiB, saw $chunks", chunks.all { it <= 2048 })
+        val before = checkNotNull(bodyBeforeFrame) { "the frame must interleave before FILE_END" }
+        assertTrue("the frame waits behind the pipe plus a chunk, not the file ($before B)", before <= 4 * 1024 + 2048)
+        assertArrayEquals(body, received.toByteArray())
+    }
+
+    @Test
+    fun aPaceChangeMidFileTakesTheNextChunk() {
+        // The link steps to Coded after the first chunk: the feed reads its pace before every chunk, so the rest of
+        // the file goes in Coded-sized chunks without restarting the transfer.
+        val reads = AtomicInteger()
+        val h =
+            harness(pace = {
+                if (reads.incrementAndGet() == 1) PaceConfig() else PaceConfig(bytesPerSec = 0, chunkBytes = 2048)
+            })
+        val body = ByteArray(40 * 1024) { (it % 251).toByte() }
+        val file = tmp.newFile("stepdown.bin").apply { writeBytes(body) }
+
+        h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, "e".repeat(64), "image/webp"))
+
+        val chunks = ArrayList<Int>()
+        val received = ByteArrayOutputStream()
+        var rec = LinkFraming.read(h.fromLink)
+        while (rec != null && rec.type != LinkFraming.Type.FILE_END) {
+            if (rec.type == LinkFraming.Type.FILE_CHUNK) {
+                chunks.add(rec.payload.size)
+                received.write(rec.payload)
+            }
+            rec = LinkFraming.read(h.fromLink)
+        }
+        assertEquals("the first chunk at the 1M size", LinkFraming.FILE_CHUNK_BYTES, chunks.first())
+        assertTrue("every later chunk at the Coded size, saw $chunks", chunks.drop(1).all { it <= 2048 })
+        assertArrayEquals(body, received.toByteArray())
     }
 
     @Test
