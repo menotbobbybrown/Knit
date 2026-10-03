@@ -108,6 +108,7 @@ class TransferManagerTest {
                 peerNearby = { side.nearby },
                 timings = timings,
                 clock = clock,
+                newPort = FakeDirectWifi::freeLoopbackPort,
                 log = { trace += "${clock()} $it" },
             )
         side = Side(name, log, wifi, files, signals, rows, manager, trace)

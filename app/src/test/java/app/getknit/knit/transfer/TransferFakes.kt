@@ -9,11 +9,13 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.net.BindException
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.Collections
+import kotlin.random.Random
 
 /** A shared, ordered log of what a side did — signals sent and radio calls — for ordering assertions. */
 class SideLog(
@@ -84,6 +86,25 @@ class FakeDirectWifi(
     companion object {
         private val V4: InetAddress = InetAddress.getByName("127.0.0.1")
         private val V6: InetAddress = InetAddress.getByName("::1")
+
+        /**
+         * A port the host can bind on both loopbacks. The manager's own pick (40000-60000) sits inside Linux's
+         * ephemeral range (32768-60999), and on loopback every outbound socket of every test fork draws from
+         * that range — a CI run bound `127.0.0.1` into "Address already in use". A real group interface is
+         * fresh, so this is the test's problem only: pick below the range and probe before handing it out.
+         */
+        fun freeLoopbackPort(): Int {
+            repeat(50) {
+                val port = Random.nextInt(20_000, 32_000)
+                val free =
+                    listOf(V4, V6).all { address ->
+                        runCatching { ServerSocket().use { it.bind(InetSocketAddress(address, port)) } }
+                            .fold({ true }, { address == V6 && it !is BindException })
+                    }
+                if (free) return port
+            }
+            error("no free loopback port in 20000-32000")
+        }
 
         /**
          * Whether this JVM can listen on IPv6 loopback at all. Some CI hosts boot with IPv6 off at the kernel,
