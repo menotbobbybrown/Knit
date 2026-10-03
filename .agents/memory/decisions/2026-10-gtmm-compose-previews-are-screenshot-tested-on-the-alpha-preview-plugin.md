@@ -9,7 +9,7 @@ topics: [testing, toolchain, ui]
 # ADR 2026-10.gtmm — Compose previews are screenshot-tested on the alpha preview plugin
 
 Status: Accepted (2026-10-02) as an experiment on `test/compose-testing`. Every public `@Preview` is covered
-(166 subjects, 332 images); it is not wired into CI.
+(166 subjects, 332 images). CI runs it on GitHub and GitLab, advisory until the runners have rendered green.
 
 **What was observed.** Nothing in the tree compared pixels. The Robolectric `createComposeRule` tests assert
 semantics, and the seeded FTL suite only captures screenshots for a human to read. Meanwhile the app had 165
@@ -66,7 +66,12 @@ Covering every preview took five changes outside the test source set:
 - **Running it:** a warm `validateDebugScreenshotTest` takes about 45 s and `update` about 40 s; the
   configuration cache stays green.
 - **LFS:** running or updating the tests needs git-lfs, and every re-render adds its images to LFS storage
-  (GitHub's quota) rather than to clone history. A CI job would need an LFS checkout.
+  (GitHub's quota) rather than to clone history. CI fetches them in the screenshot job alone: GitHub's
+  through an `actions/cache` keyed on the object ids, GitLab's by lifting a pipeline-wide
+  `GIT_LFS_SKIP_SMUDGE=1`, which also makes `build:release` there build from pointers, as F-Droid does.
+- **The runners' CPUs are not the workstation's.** The references were rendered without AVX-512, and Skia's
+  rasterizer can take another SIMD path on a runner that has it. So both CI jobs start advisory, and a few
+  green runs on each are what make them enforced.
 - **What a failure looks like:** a 2 dp change to `ConnectionStatusRow`'s status dot failed exactly the images
   that draw the row, as `Size Mismatch` on the content-sized shots and a 0.25 % diff on the chat-list screen.
 - **Stability:** references rendered under `Asia/Kolkata` validated under `America/Los_Angeles`,

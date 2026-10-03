@@ -7,7 +7,8 @@ name: CI
 # (continue-on-error), matching the GitLab pipeline's allow_failure posture; they are enforced locally
 # by the repo's Git hooks. The *.tflite moderation models are ordinary Git blobs (NOT LFS — see
 # .gitattributes and .agents/context/distribution.md), so a plain checkout is enough; the build's
-# checkModerationModels task hard-fails if one ever arrives as a pointer stub.
+# checkModerationModels task hard-fails if one ever arrives as a pointer stub. The only LFS objects are the
+# Compose screenshot references, and only screenshot-tests fetches them.
 #
 # ACTION PINS: every JS action here is held at a major that runs on Node 24 — GitHub's runners force
 # Node 20 actions onto 24 and warn about it, and the Node 20 runtime is going away. JetBrains/qodana-action
@@ -128,6 +129,49 @@ jobs:
           path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
 
+  screenshot-tests:
+    name: Compose preview screenshots (advisory)
+    runs-on: ubuntu-latest
+    # Every @Preview rendered through layoutlib and diffed against the committed references
+    # (app/src/screenshotTest/, ADR 2026-10.gtmm, .agents/context/testing.md). Advisory until it has rendered
+    # green here a few times: the references were rendered on a workstation without AVX-512, and Skia's CPU
+    # rasterizer can take another SIMD path on a runner that has it. On a failure the artifact holds the
+    # report (self-contained, every image inlined), the renders and the diffs — enough to tell a real
+    # regression from a runner rendering differently. Then make it enforced, like mesh-lab.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      # The references are the repo's only Git LFS objects (.gitattributes). Fetched through a cache keyed on
+      # their ids rather than with `lfs: true`, so a run spends the LFS bandwidth quota only when they change.
+      - name: List the LFS objects
+        run: git lfs ls-files --long | cut -d ' ' -f1 | sort > .lfs-ids
+      - uses: actions/cache@v6
+        with:
+          path: .git/lfs
+          key: lfs-${{ hashFiles('.lfs-ids') }}
+          restore-keys: lfs-
+      - name: Fetch the screenshot references
+        run: git lfs pull
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools # NOT the default `tools platform-tools` — see ACTION PINS above
+      - uses: gradle/actions/setup-gradle@v5
+      - name: Validate the previews against their references
+        run: ./gradlew :app:validateDebugScreenshotTest --stacktrace --console=plain
+      - name: Upload screenshot report, renders and diffs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-test-report
+          path: |
+            app/build/reports/screenshotTest/preview/debug/
+            app/build/outputs/screenshotTest-results/preview/debug/
+          if-no-files-found: ignore
+
   verify:
     name: detekt & ktlint (advisory)
     runs-on: ubuntu-latest
@@ -216,3 +260,6 @@ jobs:
         run: python3 -m unittest scripts/test_gen_emoji_catalog.py
       - name: Check app/src/main/assets/emoji/emoji_en.tsv
         run: python3 scripts/gen-emoji-catalog.py --check
+      # Every @Preview has its screenshot test: a preview added or renamed without a regenerate fails here.
+      - name: Check app/src/screenshotTest/ wrappers
+        run: python3 scripts/gen-screenshot-tests.py --check

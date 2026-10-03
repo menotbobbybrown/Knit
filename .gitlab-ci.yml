@@ -32,6 +32,10 @@ variables:
   # Both must resolve in F-Droid's buildserver image first: .agents/context/distribution.md.
   ANDROID_COMPILE_SDK: "37.1"
   ANDROID_BUILD_TOOLS: "37.0.0"
+  # Check out Git LFS objects as pointers. The only ones are the Compose screenshot references, which only
+  # test:screenshots reads (it sets this back to 0); every other job — build:release above all — then sees
+  # the tree F-Droid's LFS-less clone sees, as GitHub's default checkout does. See .gitattributes.
+  GIT_LFS_SKIP_SMUDGE: "1"
 
 workflow:
   rules:                              # avoid duplicate branch+MR pipelines
@@ -292,6 +296,35 @@ test:coverage:
       - app/build/reports/kover/reportDebug.xml
     expire_in: 1 week
 
+# Compose preview screenshot tests (ADR 2026-10.gtmm, .agents/context/testing.md): every @Preview rendered
+# through layoutlib and diffed against the committed references. The one job that fetches the LFS objects
+# (GIT_LFS_SKIP_SMUDGE back to 0 — the runner then runs `git lfs pull` after its checkout). Advisory until it
+# has rendered green on this runner a few times: the references were rendered on a workstation, and Skia's CPU
+# rasterizer can take another SIMD path on another CPU. Then drop allow_failure, like test:mesh-lab.
+# Same compile/run split as test:unit, for the same reason: the forked rendering JVM must not start while the
+# compile daemon is still resident. The first list is validateDebugScreenshotTest's graph minus the task
+# itself (`./gradlew :app:validateDebugScreenshotTest --dry-run` re-derives it); build:debug's build cache
+# answers the main-source compile. Artifacts on failure only — the report inlines every image, ~40 MB.
+test:screenshots:
+  extends: .android
+  stage: test
+  tags: [skuld]
+  needs: [{job: "build:debug", artifacts: false}]
+  allow_failure: true
+  variables:
+    GIT_LFS_SKIP_SMUDGE: "0"
+  script:
+    - ./gradlew :app:compileDebugScreenshotTestJavaWithJavac :app:packageDebugScreenshotTestForScreenshotTest :app:bundleDebugClassesToRuntimeJar :app:mergeDebugAssets :app:processDebugResources --stacktrace --console=plain
+    - ./gradlew :app:validateDebugScreenshotTest --stacktrace --console=plain
+  artifacts:
+    when: on_failure
+    reports:
+      junit: app/build/test-results/validateDebugScreenshotTest/**/TEST-*.xml
+    paths:
+      - app/build/reports/screenshotTest/preview/debug/
+      - app/build/outputs/screenshotTest-results/preview/debug/
+    expire_in: 1 week
+
 # --------------- verify (enforced) -------
 # The ADR router, `.agents/memory/decisions.md`, is generated from `.agents/memory/decisions/` and is
 # checked in. Enforced (not advisory, unlike the jobs below) because a stale router silently hides a
@@ -308,6 +341,16 @@ verify:adr-index:
   needs: []
   script:
     - python3 scripts/adr.py index --check
+
+# Every @Preview has its screenshot test (scripts/gen-screenshot-tests.py): a preview added or renamed without
+# a regenerate fails here rather than going untested. Enforced, unlike test:screenshots — this is a text
+# comparison with no renderer in it. Mirrors the step in GitHub's `generated-assets` job.
+verify:screenshot-wrappers:
+  image: python:3.13-alpine
+  stage: verify
+  needs: []
+  script:
+    - python3 scripts/gen-screenshot-tests.py --check
 
 # --------------- verify (advisory) -------
 # detekt/ktlint run as Gradle plugins now (was: a downloaded detekt-cli jar). Both are advisory
