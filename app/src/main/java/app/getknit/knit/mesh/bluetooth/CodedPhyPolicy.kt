@@ -54,6 +54,12 @@ data class PhyTuning(
     /** Step a Coded link back up once its smoothed link RSSI has held at or over this for [stepUpHoldMs]. */
     val stepUpDbm: Int = STEP_UP_DBM,
     val stepUpHoldMs: Long = 30_000,
+    /**
+     * Or once it has held at or over this for [stepUpFastHoldMs]: a link this strong is plainly back in range, and the
+     * 30 s hold is sized for the band just above [stepUpDbm], where a link hovering at the edge would flap (#113).
+     */
+    val stepUpFastDbm: Int = STEP_UP_FAST_DBM,
+    val stepUpFastHoldMs: Long = 10_000,
     /** No automatic switch sooner than this after the last one, so a link at the boundary cannot flap. */
     val minSwitchGapMs: Long = 20_000,
     /** A request no PHY update answered by then is given up for the link (a controller without Coded answers nothing). */
@@ -75,6 +81,7 @@ data class PhyTuning(
         // Negative defaults can't be inlined without tripping MagicNumber (as PromotionConfig's floor).
         const val STEP_DOWN_DBM = -82
         const val STEP_UP_DBM = -72
+        const val STEP_UP_FAST_DBM = -62
         const val EDGE_DBM = -75
     }
 }
@@ -214,6 +221,9 @@ object CodedPhyPolicy {
 class PhyStepper(
     private val tuning: () -> PhyTuning,
 ) {
+    /** Which step-up hold a link's smoothed RSSI is running: none, [PhyTuning.stepUpHoldMs] or [PhyTuning.stepUpFastHoldMs]. */
+    enum class StepUpHold { NONE, SLOW, FAST }
+
     /** What to ask the controller for now. */
     enum class Action {
         STAY,
@@ -255,6 +265,7 @@ class PhyStepper(
     private var lastSwitchAt: Long? = null
     private var weakReads = 0
     private var strongSince: Long? = null
+    private var fastSince: Long? = null
 
     /**
      * The controller reported [reported] (a read, an update this side asked for, or one the peer asked for). An
@@ -279,23 +290,38 @@ class PhyStepper(
             lastSwitchAt = now
             weakReads = 0
             strongSince = null
+            fastSince = null
         }
         if (succeeded) phy = reported
         return changed
     }
 
-    /** A link-RSSI read came back: smoothed, and counted toward a step either way. */
+    /**
+     * A link-RSSI read came back: smoothed, and counted toward a step either way. A read that falls under
+     * [PhyTuning.stepUpFastDbm] but not [PhyTuning.stepUpDbm] ends the fast hold and leaves the slow one running from
+     * where it started. Returns the step-up hold the read moved the link into, or null when it stayed in the same one.
+     */
     @Synchronized
     fun onRssi(
         rssi: Int,
         now: Long,
-    ) {
+    ): StepUpHold? {
         val t = tuning()
+        val before = hold()
         val s = smoothedRssi?.let { t.rssiAlpha * rssi + (1 - t.rssiAlpha) * it } ?: rssi.toDouble()
         smoothedRssi = s
         weakReads = if (s <= t.stepDownDbm) weakReads + 1 else 0
         strongSince = if (s >= t.stepUpDbm) strongSince ?: now else null
+        fastSince = if (s >= t.stepUpFastDbm) fastSince ?: now else null
+        return hold().takeIf { it != before }
     }
+
+    private fun hold(): StepUpHold =
+        when {
+            fastSince != null -> StepUpHold.FAST
+            strongSince != null -> StepUpHold.SLOW
+            else -> StepUpHold.NONE
+        }
 
     /** What to ask for under [mode] at [now]; a request it returns is pending until [onPhy] answers it. */
     @Synchronized
@@ -345,17 +371,31 @@ class PhyStepper(
             else -> autoTarget(t, now)?.takeIf { lastSwitchAt.let { at -> at == null || now - at >= t.minSwitchGapMs } }
         }
 
+    /**
+     * AUTO's step rule. A Coded link steps up after either hold: [PhyTuning.stepUpFastHoldMs] at
+     * [PhyTuning.stepUpFastDbm] or stronger, [PhyTuning.stepUpHoldMs] at [PhyTuning.stepUpDbm]. [decide] runs once per
+     * read (every 5 s above [PhyTuning.edgeDbm]), so a 10 s hold is met on the third strong read.
+     */
     private fun autoTarget(
         t: PhyTuning,
         now: Long,
-    ): Action? {
-        val up = strongSince
-        return when {
+    ): Action? =
+        when {
             phy != LinkPhy.CODED && weakReads >= t.stepDownReads -> Action.REQUEST_CODED
-            phy == LinkPhy.CODED && up != null && now - up >= t.stepUpHoldMs -> Action.REQUEST_FAST
+            phy == LinkPhy.CODED && heldStrong(t, now) -> Action.REQUEST_FAST
             else -> null
         }
-    }
+
+    private fun heldStrong(
+        t: PhyTuning,
+        now: Long,
+    ): Boolean = held(strongSince, t.stepUpHoldMs, now) || held(fastSince, t.stepUpFastHoldMs, now)
+
+    private fun held(
+        since: Long?,
+        holdMs: Long,
+        now: Long,
+    ): Boolean = since != null && now - since >= holdMs
 
     /** How long until the next link-RSSI read: tighter at the edge, where a walk-away has seconds to spare. */
     @Synchronized

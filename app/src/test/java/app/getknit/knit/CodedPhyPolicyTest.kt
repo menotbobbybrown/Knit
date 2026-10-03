@@ -6,6 +6,7 @@ import app.getknit.knit.mesh.bluetooth.CodedPhyPolicy
 import app.getknit.knit.mesh.bluetooth.LinkPhy
 import app.getknit.knit.mesh.bluetooth.PhyStepper
 import app.getknit.knit.mesh.bluetooth.PhyStepper.Action
+import app.getknit.knit.mesh.bluetooth.PhyStepper.StepUpHold
 import app.getknit.knit.mesh.bluetooth.PhyTuning
 import app.getknit.knit.mesh.bluetooth.PromotionPolicy
 import app.getknit.knit.mesh.bluetooth.ScanPhys
@@ -340,11 +341,54 @@ class CodedPhyPolicyTest {
     }
 
     @Test
-    fun aCodedLinkStepsUpOnlyAfterHoldingStrong() {
-        val s = stepper(LinkPhy.CODED, -60)
+    fun aCodedLinkJustOverTheStepUpLineWaitsTheSlowHold() {
+        val s = stepper(LinkPhy.CODED, -68)
         assertEquals(Action.STAY, s.decide(CodedPhyMode.AUTO, now = 29_000))
-        s.onRssi(-60, now = 30_000)
+        s.onRssi(-68, now = 30_000)
         assertEquals(Action.REQUEST_FAST, s.decide(CodedPhyMode.AUTO, now = 30_000))
+    }
+
+    @Test
+    fun aStrongCodedLinkStepsUpAfterTheFastHold() {
+        // #113: a link back at −55 waited out the 30 s hold meant for the band just over −72.
+        val s = stepper(LinkPhy.CODED, -55)
+        assertEquals(Action.STAY, s.decide(CodedPhyMode.AUTO, now = 9_999))
+        assertEquals(Action.REQUEST_FAST, s.decide(CodedPhyMode.AUTO, now = 10_000))
+    }
+
+    @Test
+    fun aReadUnderTheFastTierFallsBackToTheSlowHold() {
+        val s = stepper(LinkPhy.CODED, -55) // both holds from 0
+        assertEquals(StepUpHold.SLOW, s.onRssi(-77, now = 5_000)) // smoothed −66: under −62, still over −72
+        s.onRssi(-66, now = 10_000)
+        assertEquals(Action.STAY, s.decide(CodedPhyMode.AUTO, now = 10_000))
+        s.onRssi(-66, now = 25_000)
+        assertEquals(Action.STAY, s.decide(CodedPhyMode.AUTO, now = 29_999))
+        // The slow hold ran from 0, not from the dip.
+        assertEquals(Action.REQUEST_FAST, s.decide(CodedPhyMode.AUTO, now = 30_000))
+    }
+
+    @Test
+    fun theFastTierStillWaitsOutTheMinimumGap() {
+        val s = stepper(LinkPhy.ONE_M, -90, -90, -90)
+        assertEquals(Action.REQUEST_CODED, s.decide(CodedPhyMode.AUTO, now = 3_000))
+        assertTrue(s.onPhy(LinkPhy.CODED, succeeded = true, now = 3_200))
+        // Straight back in: smoothed −70, −60, −55, … — fast from 5 s, its hold met at 15 s.
+        (4_000L..23_000L step 1_000L).forEach { s.onRssi(-50, now = it) }
+        assertEquals(Action.STAY, s.decide(CodedPhyMode.AUTO, now = 15_000))
+        assertEquals(Action.STAY, s.decide(CodedPhyMode.AUTO, now = 23_199))
+        assertEquals(Action.REQUEST_FAST, s.decide(CodedPhyMode.AUTO, now = 23_200))
+    }
+
+    @Test
+    fun aReadReportsTheStepUpHoldItMovesInto() {
+        val s = PhyStepper { tuning }.also { it.onPhy(LinkPhy.CODED, succeeded = true, now = 0) }
+        assertNull(s.onRssi(-90, now = 0)) // none, as before
+        assertEquals(StepUpHold.SLOW, s.onRssi(-50, now = 1_000)) // smoothed −70
+        assertEquals(StepUpHold.FAST, s.onRssi(-50, now = 2_000)) // −60
+        assertNull(s.onRssi(-50, now = 3_000)) // −55, still fast
+        assertEquals(StepUpHold.SLOW, s.onRssi(-80, now = 4_000)) // −67.5
+        assertEquals(StepUpHold.NONE, s.onRssi(-100, now = 5_000)) // −83.75
     }
 
     @Test

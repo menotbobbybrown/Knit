@@ -119,7 +119,7 @@ internal class BlePhyControl(
                 if (drives) act(g, stepper.decide(mode(), now()))
                 withTimeoutOrNull(stepper.nextReadMs()) { pokes.receive() }
                 if (runCatching { g.readRemoteRssi() }.getOrNull() == true) {
-                    withTimeoutOrNull(RSSI_TIMEOUT_MS) { rssiReads.receive() }?.let { stepper.onRssi(it, now()) }
+                    withTimeoutOrNull(RSSI_TIMEOUT_MS) { rssiReads.receive() }?.let { onRssi(it) }
                 }
             }
         } finally {
@@ -130,6 +130,14 @@ internal class BlePhyControl(
                 runCatching { it.close() }
             }
             gatt = null
+        }
+    }
+
+    /** Feeds a read to the stepper, logging the step-up hold a Coded link moves into: the link RSSI of a walk back in. */
+    private fun onRssi(rssi: Int) {
+        val hold = stepper.onRssi(rssi, now()) ?: return
+        if (stepper.phy == LinkPhy.CODED) {
+            Log.i(TAG, "bt phy $nodeId step-up hold ${hold.name.lowercase()} (rssi=${stepper.smoothedRssi?.toInt()})")
         }
     }
 

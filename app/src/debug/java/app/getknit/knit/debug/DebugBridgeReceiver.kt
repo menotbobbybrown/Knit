@@ -204,8 +204,8 @@ import java.nio.ByteBuffer
  *   build's `SwitchableTransport`; persists across restarts until switched back on.
  * - [ACTION_PHY] — the **BLE Coded PHY experiment** (ADR 2026-10.yvn6; `BuildConfig.BLE_CODED_PHY`, else an error).
  *   `--es mode off|auto|coded|1m` stores the mode (`SettingsStore.debugBlePhyMode`, applied live), `--es txpower
- *   high|medium` re-raises the Coded advert, and `--ei stepDown|stepUp|stepDownReads|minGapMs|stepUpHoldMs N`
- *   overrides the step thresholds, `--ei credit N` the dB a Coded advert reading gains on the 1M scale (12), and
+ *   high|medium` re-raises the Coded advert, and `--ei stepDown|stepUp|stepDownReads|minGapMs|stepUpHoldMs N` and
+ *   `--ei stepUpFast|stepUpFastHoldMs N` (−62, 10000) override the step thresholds, `--ei credit N` the dB a Coded advert reading gains on the 1M scale (12), and
  *   `--ei fastAdvertMs|fastHoldMs N` the Coded advert's interval after a link at range drops (250) and how long it
  *   holds (180000), until the process dies (`--ez resetTuning true` restores them). The reply: `mode`, `supported`, `advert`
  *   (off|starting|live|dark <status>), `txPower`, the tuning, `links[]` (nodeId, phy, linkRssi, drives, attached,
@@ -2126,6 +2126,8 @@ class DebugBridgeReceiver :
                 stepDownReads = int("stepDownReads") ?: t.stepDownReads,
                 minSwitchGapMs = int("minGapMs")?.toLong() ?: t.minSwitchGapMs,
                 stepUpHoldMs = int("stepUpHoldMs")?.toLong() ?: t.stepUpHoldMs,
+                stepUpFastDbm = int("stepUpFast") ?: t.stepUpFastDbm,
+                stepUpFastHoldMs = int("stepUpFastHoldMs")?.toLong() ?: t.stepUpFastHoldMs,
                 codedCreditDb = int("credit")?.toDouble() ?: t.codedCreditDb,
                 fastAdvertMs = int("fastAdvertMs") ?: t.fastAdvertMs,
                 fastHoldMs = int("fastHoldMs")?.toLong() ?: t.fastHoldMs,
@@ -2146,6 +2148,8 @@ class DebugBridgeReceiver :
                     .put("stepDownReads", tuned.stepDownReads)
                     .put("stepUp", tuned.stepUpDbm)
                     .put("stepUpHoldMs", tuned.stepUpHoldMs)
+                    .put("stepUpFast", tuned.stepUpFastDbm)
+                    .put("stepUpFastHoldMs", tuned.stepUpFastHoldMs)
                     .put("minGapMs", tuned.minSwitchGapMs)
                     .put("credit", tuned.codedCreditDb.toInt())
                     .put("fastAdvertMs", tuned.fastAdvertMs)

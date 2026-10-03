@@ -276,3 +276,37 @@ the link RSSI along a walk, and the stepper does not log its reads yet.
 Tests: `CodedPhyPolicyTest`. It covers a Coded-only window after an all-PHY one, a first hit in a Coded-only window, a
 1M advert an all-PHY window misses, a far peer heard only in Coded-only windows, the mark outliving presence, a quiet
 peer keeping its verdict, and `clear()`.
+
+## Amendment 2026-10-02 (4) — a strong Coded link steps up after 10 s
+
+**What was observed (#113).** On the 2026-10-02 evening walk the P9 carried its link to the P8 out to Coded at 20:13:08
+and back. Wi-Fi Aware discovered the P8 again at 20:22:32. The P9's link-RSSI reads went from every 2 s back to every
+5 s at about 20:23:33, so the smoothed RSSI had climbed past −75. The step-up came at 20:24:13, `CODED→TWO_M rssi=-52`.
+About 60 s of the wait was a link that was still weak. The other 40 s was the 30 s hold and the climb through −75 to
+−72. The hold is the same whether a link reads −71 or −50, and a link on Coded moves about a fifth of what 1M moves.
+
+**What changed.**
+
+- `PhyStepper` steps a Coded link up after either of two holds. The fast hold is 10 s at −62 or stronger
+  (`PhyTuning.stepUpFastDbm` / `stepUpFastHoldMs`). The slow hold is unchanged: 30 s at −72 or stronger.
+- A read that falls under −62 but stays at or over −72 ends the fast hold. The slow hold keeps running from where it
+  started; it does not restart.
+- `minSwitchGapMs` (20 s) still bounds every automatic step, the fast one included.
+- The stepper decides once per read, every 5 s above −75, so the fast hold is met on the third strong read.
+- `…debug.PHY` sets the new fields with `--ei stepUpFast N` and `--ei stepUpFastHoldMs N`. The reply's `tuning` shows
+  them.
+- A Coded link logs `bt phy <id> step-up hold none|slow|fast (rssi=…)` when its smoothed RSSI moves between the bands.
+  This is the first record of link RSSI along a walk. The amendment before this one noted the stepper did not log its
+  reads.
+
+**Why the −72 to −62 band keeps 30 s.** The 30 s hold and the 10 dB of hysteresis over the −82 step-down are what keep
+a link hovering just over −72 from flapping. A link at −62 has 20 dB of margin over the step-down, so a short hold
+there costs nothing.
+
+**Not taken.** A shorter hold for every reading would remove the guard sized for the hovering band. Stepping up on a
+strong 1M advert would need its own threshold: advert RSSI reads about 20 dB apart from link RSSI, and an advert says
+nothing about the link's own margin.
+
+Tests: `CodedPhyPolicyTest`, which covers the fast hold, the slow band waiting 30 s, a dip under −62 falling back to
+the slow hold, the fast tier inside the minimum gap, and the band each read reports. A walk back into range is still
+owed. It should measure the time from `step-up hold fast` to `CODED→`, against the 40 s above.
