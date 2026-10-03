@@ -9,7 +9,7 @@ product:
   platforms: [android]
   category: Communication
 document:
-  updated: 2026-09-24T21:26:44Z
+  updated: 2026-10-03T03:55:42Z
   coverage: partial
   canonical: https://github.com/getknit/knit/blob/main/CHANGELOG.md
   locale: en
@@ -22,13 +22,6 @@ document:
 
 ### Added
 
-- You can now remove someone from your contacts using the menu on their profile. It deletes your chat with
-  them from this phone, and they aren't told. People you share a group with stay in your contacts while
-  you're both in it.
-- You can now clear the Nearby room's messages by long-pressing it in the chat list, as you can with other
-  chats. This only removes them from your phone, and the room stays in your list.
-- A GIF now shows as "GIF" rather than "Photo" in the chat list, in message details and when you reply to
-  one. Most GIFs from before this update still show as Photo.
 - Diagnostics now lists people whose messages reach you through another nearby phone under Reachable
   indirectly, along with the phone that passed them on. Their profile says Reachable indirectly too, where it
   used to say Offline.
@@ -42,6 +35,23 @@ document:
 - When your phone lost its last Bluetooth connection to nearby phones, it could start looking for them less
   often almost at once, so it took longer to reconnect when you came back into range. It now keeps looking at
   full speed for three minutes first.
+
+## [2.8.0](https://github.com/getknit/knit/releases/tag/v2.8.0) — 2026-10-03T03:55:42Z
+
+> Remove a contact, clear the Nearby room, and see stuck messages get through
+
+### Added
+
+- You can now remove someone from your contacts using the menu on their profile. It deletes your chat with
+  them from this phone, and they aren't told. People you share a group with stay in your contacts while
+  you're both in it.
+- You can now clear the Nearby room's messages by long-pressing it in the chat list, as you can with other
+  chats. This only removes them from your phone, and the room stays in your list.
+- A GIF now shows as "GIF" rather than "Photo" in the chat list, in message details and when you reply to
+  one. Most GIFs from before this update still show as Photo.
+
+### Fixed
+
 - If the phone's secure storage didn't respond when Knit started, Knit could delete your messages and come
   back as a stranger to your contacts. Knit now waits instead, with Try again to keep everything or Start
   over if the storage never answers.
@@ -82,6 +92,12 @@ document:
 - A stranger could get a group past Message Requests by naming you as its creator, so their first message
   notified you and showed up among your chats. That group now waits in Message Requests like any other
   request.
+- When two phones near each other each had a LoRa board, Knit could spend the radio's airtime for hours
+  re-sending delivery ticks, and new LoRa messages waited behind them. A tick now goes over LoRa only when the
+  radio is how it reaches that person, and Knit waits longer between retries.
+- In a chat with someone on an older Knit, the relay indicator said "Not covered yet", but relays were never
+  going to carry that chat. It now explains that relays need forward secrecy, and will carry the chat once
+  that person updates Knit.
 
 ## [2.7.0](https://github.com/getknit/knit/releases/tag/v2.7.0) — 2026-09-24T21:26:44Z
 
