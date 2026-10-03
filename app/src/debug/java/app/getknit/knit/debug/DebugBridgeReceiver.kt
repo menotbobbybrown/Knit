@@ -51,6 +51,8 @@ import app.getknit.knit.mesh.StoreDigest
 import app.getknit.knit.mesh.TransportKind
 import app.getknit.knit.mesh.bluetooth.CodedPhyDiag
 import app.getknit.knit.mesh.bluetooth.CodedPhyMode
+import app.getknit.knit.mesh.bluetooth.CodedPhyPolicy
+import app.getknit.knit.mesh.bluetooth.LinkPhy
 import app.getknit.knit.mesh.bluetooth.PhyTuning
 import app.getknit.knit.mesh.bluetooth.PromotionConfig
 import app.getknit.knit.mesh.indirectPeers
@@ -208,8 +210,10 @@ import java.nio.ByteBuffer
  *   high|medium` re-raises the Coded advert, and `--ei stepDown|stepUp|stepDownReads|minGapMs|stepUpHoldMs N` and
  *   `--ei stepUpFast|stepUpFastHoldMs N` (−62, 10000) override the step thresholds, `--ei credit N` the dB a Coded advert reading gains on the 1M scale (12), and
  *   `--ei fastAdvertMs|fastHoldMs N` the Coded advert's interval after a link at range drops (250) and how long it
- *   holds (180000), until the process dies (`--ez resetTuning true` restores them). The reply: `mode`, `supported`, `advert`
- *   (off|starting|live|dark <status>), `txPower`, the tuning, `links[]` (nodeId, phy, linkRssi, drives, attached,
+ *   holds (180000), `--ei codedPace|codedChunk N` a file's feed rate in B/s and chunk on a link on Coded (1024, 2048), and
+ *   `--ei filePace N` the feed rate on a link on 1M or 2M (28672; 0 unbounded; its chunk is two seconds of it, 2048 to
+ *   16384 — #117), until the process dies (`--ez resetTuning true` restores them). The reply: `mode`, `supported`, `advert`
+ *   (off|starting|live|dark <status>), `txPower`, the tuning (with `fileChunk`, the 1M/2M chunk), `links[]` (nodeId, phy, linkRssi, drives, attached,
  *   switches, gaveUp) and `peers[]` (nodeId, rssi on the 1M scale, oneMSeenAgoMs, codedSeenAgoMs, each PHY's own
  *   rssi1m / rssiCoded, and codedLagMs — the 1M listening its Coded hits outlast its 1M ones by; over 8000 is Coded
  *   alone).
@@ -2139,6 +2143,7 @@ class DebugBridgeReceiver :
                 fastHoldMs = int("fastHoldMs")?.toLong() ?: t.fastHoldMs,
                 codedPaceBytesPerSec = int("codedPace") ?: t.codedPaceBytesPerSec,
                 codedChunkBytes = int("codedChunk")?.coerceIn(1, LinkFraming.FILE_CHUNK_BYTES) ?: t.codedChunkBytes,
+                filePaceBytesPerSec = int("filePace") ?: t.filePaceBytesPerSec,
             )
         delay(PHY_SETTLE_MS) // the transport collects the stored mode; let it land before reading the status back
         val status = CodedPhyDiag.status?.invoke() ?: return reply("error", "Bluetooth transport is not running")
@@ -2163,7 +2168,9 @@ class DebugBridgeReceiver :
                     .put("fastAdvertMs", tuned.fastAdvertMs)
                     .put("fastHoldMs", tuned.fastHoldMs)
                     .put("codedPace", tuned.codedPaceBytesPerSec)
-                    .put("codedChunk", tuned.codedChunkBytes),
+                    .put("codedChunk", tuned.codedChunkBytes)
+                    .put("filePace", tuned.filePaceBytesPerSec)
+                    .put("fileChunk", CodedPhyPolicy.pace(LinkPhy.ONE_M, tuned).chunkBytes),
             ).put(
                 "links",
                 JSONArray(

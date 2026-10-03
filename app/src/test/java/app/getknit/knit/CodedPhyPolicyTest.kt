@@ -508,4 +508,25 @@ class CodedPhyPolicyTest {
         val tuned = tuning.copy(codedPaceBytesPerSec = 512, codedChunkBytes = 1 shl 20)
         assertEquals(PaceConfig(512, LinkFraming.FILE_CHUNK_BYTES), CodedPhyPolicy.pace(LinkPhy.CODED, tuned))
     }
+
+    @Test
+    fun theOneMPaceIsTunableAndItsChunkIsTwoSecondsOfIt() {
+        // #117: the trial sweeps `filePace`; each chunk carries about two seconds of the feed, as Coded's 2 KiB at 1 KiB/s.
+        assertEquals(PaceConfig(8192, 16384), CodedPhyPolicy.pace(LinkPhy.ONE_M, tuning.copy(filePaceBytesPerSec = 8192)))
+        assertEquals(PaceConfig(6144, 12288), CodedPhyPolicy.pace(LinkPhy.TWO_M, tuning.copy(filePaceBytesPerSec = 6144)))
+    }
+
+    @Test
+    fun theOneMChunkIsClampedToTheCodedChunkAndTheCodecs() {
+        assertEquals(PaceConfig(512, 2048), CodedPhyPolicy.pace(LinkPhy.ONE_M, tuning.copy(filePaceBytesPerSec = 512)))
+        val fast = tuning.copy(filePaceBytesPerSec = Int.MAX_VALUE)
+        assertEquals(PaceConfig(Int.MAX_VALUE, LinkFraming.FILE_CHUNK_BYTES), CodedPhyPolicy.pace(LinkPhy.ONE_M, fast))
+    }
+
+    @Test
+    fun anUnboundedOneMPaceStaysUnboundedInWholeChunks() {
+        val unbounded = PaceConfig(0, LinkFraming.FILE_CHUNK_BYTES)
+        assertEquals(unbounded, CodedPhyPolicy.pace(LinkPhy.ONE_M, tuning.copy(filePaceBytesPerSec = 0)))
+        assertEquals(unbounded, CodedPhyPolicy.pace(LinkPhy.UNKNOWN, tuning.copy(filePaceBytesPerSec = -1)))
+    }
 }
