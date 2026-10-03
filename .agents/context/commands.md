@@ -12,6 +12,9 @@ plugins), see `context/toolchain.md`.
 ./gradlew detekt                    # static analysis (dev.detekt plugin; reports in app/build/reports/detekt/)
 ./gradlew ktlintCheck               # Kotlin style/format lint (ktlint plugin; reports in build/reports/ktlint/)
 ./gradlew ktlintFormat              # ...and autocorrect the mechanical ktlint violations in place
+./gradlew :app:validateDebugScreenshotTest # Compose preview screenshot tests vs committed PNGs (report: app/build/reports/screenshotTest/preview/debug/)
+./gradlew :app:updateDebugScreenshotTest   # ...re-render the reference PNGs in app/src/screenshotTestDebug/reference/ (review the diff)
+python3 scripts/gen-screenshot-tests.py     # ...after adding/renaming a @Preview: regenerate the wrappers (--check to verify)
 ./gradlew :app:koverHtmlReportDebug # test coverage (Kover) — HTML in app/build/reports/kover/htmlDebug/ (XML: koverXmlReportDebug)
 ./gradlew :app:connectedDebugAndroidTest -PseedDemo=true  # seeded UI instrumentation suite on ALL attached adb devices (Orchestrator)
 ./gradlew :app:pixel7api33DebugAndroidTest -PseedDemo=true # same suite on a Gradle-managed emulator ONLY (Pixel 7 @ API 33; ignores adb)

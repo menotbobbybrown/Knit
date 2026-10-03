@@ -55,9 +55,13 @@ surrounding code style.
 
 `git config core.hooksPath .githooks` opts into the repo's hooks — a `prepare-commit-msg` that adds
 the DCO sign-off, a `commit-msg` that strips agent session-link trailers, and a `pre-commit` that
-refuses an ADR commit whose generated router is out of sync. That setting replaces `.git/hooks`
-wholesale, so anything you keep there stops running; `git commit --no-verify` skips them for one
-commit.
+refuses an ADR commit whose generated router is out of sync, plus Git LFS's four hooks. That setting
+replaces `.git/hooks` wholesale, so anything you keep there stops running; `git commit --no-verify`
+skips them for one commit.
+
+The Compose preview screenshot references (`app/src/screenshotTestDebug/reference/`) are stored in
+Git LFS — the only files that are. Building the app does not need it; running or updating the
+screenshot tests does: install git-lfs, then `git lfs install && git lfs pull`.
 
 ## Where to submit
 

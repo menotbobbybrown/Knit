@@ -154,6 +154,7 @@ import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.toClipEntry
@@ -3315,8 +3316,10 @@ private fun EmptyState(
         // Fade in rather than paint on arrival. [ChatUiState.isLoading] now keeps this off screen until
         // Room has answered — a hard flash of "no messages yet" on a conversation that has hundreds used to
         // be the worst thing this screen does, and the skeleton owns that gap instead. What is left is the
-        // arrival itself: a thread that turns out to be empty gets one rather than a snap.
-        var shown by remember { mutableStateOf(false) }
+        // arrival itself: a thread that turns out to be empty gets one rather than a snap. A preview (and so a
+        // screenshot test) renders one frame, before the effect runs, so it starts shown there.
+        val inspecting = LocalInspectionMode.current
+        var shown by remember { mutableStateOf(inspecting) }
         LaunchedEffect(Unit) { shown = true }
         AnimatedVisibility(visible = shown, enter = KnitMotion.enterFade(), exit = KnitMotion.exitFade()) {
             Text(

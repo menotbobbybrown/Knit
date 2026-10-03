@@ -152,6 +152,13 @@ kover = "0.9.11"
 # android.os.Build constants, and ShadowCameraCharacteristics.set(Key, Object) → set(Key, T) — touch
 # nothing here; neither symbol appears in app/src.
 robolectric = "4.17"
+# Compose Preview Screenshot Testing (`com.android.compose.screenshot`): renders `@PreviewTest` previews from
+# `app/src/screenshotTest/` through layoutlib on the host JVM and diffs them against committed reference PNGs.
+# A standing exception to the stable-only rule (context/toolchain.md): the plugin has never shipped a stable
+# release. alpha12 is the first with AGP 9, alpha15 the first that renders under Kotlin 2.1+ (it was missing
+# kotlin-stdlib). Plugin and validation API share one version. Test-only: nothing reaches :app's runtime
+# classpath, and the release APK is byte-identical with the plugin applied.
+composeScreenshot = "0.0.1-alpha16"
 androidxTestCore = "1.7.0"
 # Android Test Orchestrator (instrumentation isolation for Firebase Test Lab): each test runs in its own
 # process with `clearPackageData` wiping app data between tests. The orchestrator/test-services pair is a
@@ -229,6 +236,8 @@ mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 # JVM Room/DAO + migration test deps (finding #5) — see the [versions] notes above.
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
+# `@PreviewTest` for the screenshot-test source set — see the composeScreenshot version note above.
+compose-screenshot-validation-api = { group = "com.android.tools.screenshot", name = "screenshot-validation-api", version.ref = "composeScreenshot" }
 # Instrumentation runner/rules (promote the transitive runner to explicit; rules gives GrantPermissionRule
 # / ActivityScenario helpers) + the Orchestrator and its test-services APK (androidTestUtil). See the
 # version notes above.
@@ -312,3 +321,6 @@ ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlintPlugin" }
 # schema dir is set via `room3 { schemaDirectory(…) }` — the Room 3 plugin's extension is `room3`, not
 # `room`. Its id is `androidx.room3`; versioned with room3 (3.0.3).
 androidx-room = { id = "androidx.room3", version.ref = "room3" }
+# Compose Preview Screenshot Testing — `updateDebugScreenshotTest` / `validateDebugScreenshotTest`. Applied on
+# :app; see the composeScreenshot version note above and .agents/context/testing.md.
+compose-screenshot = { id = "com.android.compose.screenshot", version.ref = "composeScreenshot" }

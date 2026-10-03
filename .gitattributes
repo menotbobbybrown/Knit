@@ -1,4 +1,4 @@
-# Deliberately EMPTY of LFS rules — do not re-add `*.tflite filter=lfs`.
+# No LFS for anything the release build reads — do not re-add `*.tflite filter=lfs`.
 #
 # The two moderation models (app/src/main/assets/moderation/{nsfw,toxicity}.tflite, ~32 MB total) are
 # stored as ordinary Git blobs because F-Droid's buildserver has no Git LFS support (fdroidserver issue
@@ -7,6 +7,14 @@
 # LFS here means F-Droid would ship a quietly unmoderated app that also fails reproducible-build
 # verification. Plain blobs make that impossible; the build additionally hard-fails on a stub model
 # (see the checkModerationModels task in app/build.gradle.kts).
+
+# The one LFS rule: the Compose preview screenshot references (ADR 2026-10.gtmm). They are test-only — no
+# release task reads them, and an `assembleRelease` from a pointer-only checkout is byte-identical to one from
+# a full checkout — so F-Droid's LFS-less clone gets ~130-byte pointers it never opens. They are LFS because
+# every intended UI change re-renders a batch of them (~15 MB in all), which would otherwise pile up in every
+# clone's history. Without git-lfs, `validateDebugScreenshotTest` refuses with a message rather than failing
+# 332 comparisons. Keep the pattern this narrow: a PNG anywhere else in the tree is not LFS.
+app/src/screenshotTest*/reference/**/*.png filter=lfs diff=lfs merge=lfs -text
 
 # `.agents/memory/decisions.md` is a generated router (`python3 scripts/adr.py index`)
 # over `.agents/memory/decisions/`, and its only churn is appended table rows — one per

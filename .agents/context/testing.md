@@ -16,6 +16,8 @@
    (`…/uiauto/`) covers the system shade + process lifecycle — see below.
 5. **Accessibility (ATF) suite** (`app/src/androidTest/…/a11y/`) runs Google's Accessibility Test Framework —
    the same checks the Play Console pre-launch report runs — on API 34+. See below.
+6. **Compose preview screenshot tests** (`app/src/screenshotTest/`) render every `@Preview` through layoutlib
+   on the host JVM and diff it against a committed PNG — no device, under a minute. See below.
 
 > Wi-Fi Aware needs physical devices — an emulator can't do NAN, whatever you do about Bluetooth. Use
 > `FakeLoopTransport` for logic tests and two physical Wi-Fi-Aware-capable phones (e.g. Pixels) for real
@@ -501,6 +503,59 @@ before "simplifying":
   `docs/WIRE_COMPAT.md` for the break record.)
 - After adding a test dep, **regenerate the lockfile** (`:app:dependencies --write-locks`, all configs) — see
   the lockfile rule in `rules/build-and-test.md`.
+
+## Compose preview screenshot tests (`app/src/screenshotTest/`)
+
+Google's Compose Preview Screenshot Testing plugin (`com.android.compose.screenshot`, **alpha** — a standing
+stable-only exception, ADR 2026-10.gtmm) renders each `@PreviewTest` function through layoutlib on the host JVM
+and compares it, pixel for pixel, with a PNG committed under `app/src/screenshotTestDebug/reference/`.
+
+- **Run:** `./gradlew :app:validateDebugScreenshotTest` (report:
+  `app/build/reports/screenshotTest/preview/debug/index.html`; rendered and diff images under
+  `app/build/outputs/screenshotTest-results/preview/debug/`). After an intended UI change,
+  `./gradlew :app:updateDebugScreenshotTest` re-renders the references — review the PNG diff before committing
+  it, because that is the review the test exists for. Never edit a PNG by hand.
+- **Every public `@Preview` in main is a test, generated.** `python3 scripts/gen-screenshot-tests.py` writes
+  one file per UI package (`ui.chat` -> `ChatScreenshots.kt`) of one-line `@PreviewTest` wrappers that call the
+  main `*Preview()` — the plugin only runs previews in the `screenshotTest` source set, and calling main's keeps
+  the sample data in one place. `--check` fails when a preview has no test, so after adding, renaming or
+  removing a preview run the script, then `update`. Don't hand-edit the generated files; the judgement calls
+  (which previews draw a screen, a kept `heightDp`, the large-font extras, the exclusions) are tables at the
+  top of the script. Only `ScreenshotPreviews.kt` is hand-written: `@ComponentShots` (content-sized, light +
+  dark) and `@ScreenShots` (a fixed 411×891 dp canvas, light + dark; a `Scaffold` fills whatever it is given,
+  so a screen needs a fixed size). The wrapper's `@Preview`s decide size, theme and font scale; the main
+  preview's annotation is ignored. A `private` preview stops the script — make it public, the convention.
+- **A reference PNG is keyed by the wrapper's function name, the preview's `name` and a hash of its
+  parameters.** Renaming either, or changing a `@Preview` parameter, orphans the old file: delete
+  `app/src/screenshotTestDebug/reference/` and run `update` (it rewrites every image; git shows only the real
+  changes). Keep spaces out of preview names (they land in the file name).
+- **The render is one frame.** Anything a preview's content gets on a later frame is missing from the image: a
+  `LaunchedEffect` fade-in, a `produceState` result, a size from `onSizeChanged`. `EmptyState` and
+  `EncryptionSection`'s QR start settled under `LocalInspectionMode` for this (as `Motion.kt` already reads
+  it); `AvatarCropDialog`'s photo still waits on its measured viewport, so its image checks the dialog chrome
+  only. A `Popup` is a separate window the capture leaves out, so `ReactionPicker` is excluded.
+- **Determinism is the preview's job, plus one pin.** Previews read `PREVIEW_NOW`, never the wall clock, and
+  render through `KnitPreview` (static colour scheme — `dynamicColor = false`). Some format an absolute time
+  with the JVM's zone and locale (the pause deadline, the message-details stamps, the profile and Your mesh
+  dates — rendered under another `TZ`, twelve images moved), so `app/build.gradle.kts` pins `UTC` / `en-US` on
+  both screenshot tasks. Layoutlib bundles its own fonts and Noto Color Emoji, so the images are
+  host-independent: references rendered under `Asia/Kolkata` validated under `America/Los_Angeles`,
+  `Pacific/Kiritimati`, `de_DE` and `ja_JP`.
+- **Layoutlib's framework is not the device's.** `Formatter.formatShortFileSize` below a kilobyte renders its
+  raw `${NUMBER} ${UNIT}` template (`MetricsSectionEmpty`'s "Bytes sent") — a renderer quirk the reference
+  captures, not an app bug; 2.5 MB renders normally.
+- **Failures read two ways:** `Size Mismatch` (a layout change moved a content-sized image's bounds — no diff
+  image) or `Image does not match … Difference: x%` with a diff PNG that marks the changed pixels. Any
+  difference fails; there is no tolerance configured (`testOptions.screenshotTests.imageDifferenceThreshold`
+  would set one).
+- **The references are Git LFS objects** — the repo's only LFS rule (`.gitattributes`), allowed because no
+  release task reads them (`context/distribution.md`). Without git-lfs a clone holds pointer files, and both
+  screenshot tasks refuse up front with "is a Git LFS pointer" rather than failing every comparison: install
+  it, then `git lfs install && git lfs pull`. With `core.hooksPath=.githooks` the LFS hooks come from that
+  directory; `pre-push` is the one that uploads the objects.
+- **Scale and cost:** 166 subjects, 332 images (about 15 MB in LFS). A warm `validate` takes about 45 s, an
+  `update` about 40 s. **Not wired into CI yet** — a CI job would need an LFS-enabled checkout
+  (`actions/checkout` with `lfs: true`).
 
 ## Seeded UI instrumentation suite + Firebase Test Lab
 

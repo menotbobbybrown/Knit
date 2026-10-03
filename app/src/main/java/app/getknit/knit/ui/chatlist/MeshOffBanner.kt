@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.dp
 import app.getknit.knit.R
 import app.getknit.knit.mesh.pausedUntilLabel
 import app.getknit.knit.ui.preview.KnitPreview
+import app.getknit.knit.ui.preview.PREVIEW_NOW
 import java.util.concurrent.TimeUnit
 
 /**
@@ -101,13 +102,12 @@ fun MeshOffBanner(
 @Composable
 fun MeshOffBannerPausedPreview() =
     KnitPreview {
-        val now = System.currentTimeMillis()
-        MeshOffBanner(pausedUntil = now + TimeUnit.MINUTES.toMillis(15), now = now, onAction = {})
+        MeshOffBanner(pausedUntil = PREVIEW_NOW + TimeUnit.MINUTES.toMillis(15), now = PREVIEW_NOW, onAction = {})
     }
 
 @Preview(showBackground = true)
 @Composable
 fun MeshOffBannerStoppedPreview() =
     KnitPreview {
-        MeshOffBanner(pausedUntil = null, now = System.currentTimeMillis(), onAction = {})
+        MeshOffBanner(pausedUntil = null, now = PREVIEW_NOW, onAction = {})
     }

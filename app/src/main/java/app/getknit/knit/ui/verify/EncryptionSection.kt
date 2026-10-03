@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalInspectionMode
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
@@ -163,7 +164,9 @@ fun EncryptionSection(
             // ProfileDetailsScreen is reached by a tap that is animating a screen transition at the time.
             // The encode is much cheaper since QrCode stopped writing pixels one JNI call at a time, but
             // even the cheap version is half a frame at 120Hz, and none of it needs to block the first frame.
-            val qr by produceState<ImageBitmap?>(initialValue = null, payload) {
+            // A preview (and so a screenshot test) draws only that first frame, so it encodes in place there.
+            val inspecting = LocalInspectionMode.current
+            val qr by produceState(initialValue = if (inspecting) QrCode.render(payload, QR_SIZE_PX) else null, payload) {
                 value = withContext(Dispatchers.Default) { QrCode.render(payload, QR_SIZE_PX) }
             }
             // The slot is held at full size from the start so the section doesn't reflow under the reader

@@ -19,6 +19,7 @@ plugins {
     alias(libs.plugins.kover) apply false
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.androidx.room) apply false
+    alias(libs.plugins.compose.screenshot) apply false
     // ktlint is APPLIED on the root project (not `apply false`) so it lints the root Gradle scripts
     // (build.gradle.kts + settings.gradle.kts). It is also applied on :app for the Kotlin sources.
     alias(libs.plugins.ktlint)

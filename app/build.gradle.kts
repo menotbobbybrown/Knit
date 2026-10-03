@@ -13,6 +13,7 @@ plugins {
     alias(libs.plugins.detekt) // static analysis (dev.detekt)
     alias(libs.plugins.ktlint) // Kotlin style/format lint (ktlintCheck / ktlintFormat)
     alias(libs.plugins.androidx.room) // Room 3 schema export (room3 { schemaDirectory(…) } below)
+    alias(libs.plugins.compose.screenshot) // Compose Preview Screenshot Testing (src/screenshotTest/, alpha)
 }
 
 // Release signing credentials. Loaded from a gitignored keystore.properties at the repo root, falling back
@@ -156,6 +157,9 @@ val debugAbis =
 
 android {
     namespace = "app.getknit.knit"
+    // Turns on the `screenshotTest` source set for the Compose Preview Screenshot Testing plugin (the
+    // gradle.properties flag of the same name is the other half). See .agents/context/testing.md.
+    experimentalProperties["android.experimental.enableScreenshotTest"] = true
     // API 37.1. Bumped off 36.1 to clear the `minCompileSdk=37` gate that androidx started shipping
     // (core-ktx 1.19.0, lifecycle 2.11.0, Compose UI 1.12.0, okhttp-android 5.5.0 all declare it), which
     // any 37.x satisfies. compileSdk only sets which APIs are *visible* to the compiler — runtime behavior
@@ -659,6 +663,38 @@ val checkModerationModels =
 
 tasks.named("preBuild") { dependsOn(checkModerationModels) }
 
+// Compose preview screenshot tests render in a forked JVM, and some previews format an absolute time with that
+// JVM's zone and locale (the pause deadline, message-details stamps, profile and Your mesh dates): rendered
+// under another TZ, twelve images moved. Pin both so a reference matches on every machine. Both screenshot
+// tasks are `Test`s.
+//
+// Their reference PNGs are the repo's one Git LFS rule (see .gitattributes). A clone without git-lfs holds
+// ~130-byte pointer files there, and every comparison would fail as an unreadable image — or an `update` would
+// write real PNGs that commit as plain blobs. So both tasks refuse up front and say what is missing. The tree is
+// resolved here, at configuration time, and captured by value (configuration cache; see checkModerationModels).
+val screenshotReferences =
+    fileTree(layout.projectDirectory.dir("src")) { include("screenshotTest*/reference/**/*.png") }
+tasks.withType<Test>().configureEach {
+    if (name.endsWith("ScreenshotTest")) {
+        systemProperty("user.timezone", "UTC")
+        systemProperty("user.language", "en")
+        systemProperty("user.country", "US")
+        val references = screenshotReferences
+        doFirst {
+            val pointer =
+                references.firstOrNull { png ->
+                    png.inputStream().use { String(it.readNBytes(32), Charsets.US_ASCII) }.startsWith("version https://git-lfs")
+                }
+            if (pointer != null) {
+                throw GradleException(
+                    "Screenshot reference $pointer is a Git LFS pointer, not an image. The references are " +
+                        "stored in Git LFS: install git-lfs, then run `git lfs install && git lfs pull`.",
+                )
+            }
+        }
+    }
+}
+
 // `room3`, not `room`: the Room 3 Gradle plugin (id "androidx.room3") registers its extension under that
 // name. Same DSL, same output layout.
 room3 {
@@ -867,4 +903,8 @@ dependencies {
     androidTestUtil(libs.androidx.test.services)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    // Compose Preview Screenshot Testing: `@PreviewTest` plus the preview renderer's tooling, for the
+    // `screenshotTest` source set only. See .agents/context/testing.md.
+    screenshotTestImplementation(libs.compose.screenshot.validation.api)
+    screenshotTestImplementation(libs.androidx.compose.ui.tooling)
 }

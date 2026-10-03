@@ -1,0 +1,11 @@
+#!/bin/sh
+# Git LFS's own post-merge hook: it keeps LFS file locking's read-only bits in step after a merge.
+#
+# `git lfs install` writes this hook into .git/hooks, which `core.hooksPath` replaces wholesale — so the
+# copy has to live here too, or opting into the repo's hooks would silently drop it. LFS holds only the
+# Compose preview screenshot references (see .gitattributes); nothing on the release path needs it, so a
+# machine without git-lfs passes through instead of being blocked.
+#
+# Active only while `core.hooksPath` points at this directory (see CONTRIBUTING.md).
+command -v git-lfs >/dev/null 2>&1 || exit 0
+exec git lfs post-merge "$@"

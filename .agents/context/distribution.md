@@ -37,7 +37,8 @@ machine, different Android SDK install, F-Droid's own Gradle distribution, fresh
 and baseline-profile generation all proved deterministic.
 
 Notes on that image: **Debian 13 (trixie), JDK 21 is the default**, `git-lfs` is **not** installed (hence
-the LFS ban below), and the `fdroid` CLI is absent — it is the build environment, not the tooling.
+no LFS on the release path, below), and the `fdroid` CLI is absent — it is the build environment, not the
+tooling.
 
 ## Running the real `fdroid build` locally
 
@@ -137,12 +138,12 @@ Four inputs were deliberately de-machine-ified to keep it that way:
   `gradle/gradle-daemon-jvm.properties`. Both would fetch an unpinned JDK from api.foojay.io. Gradle now
   fails loudly instead, and the builder installs JDK 21 (the recipe's `sudo:` block does this).
   `./gradlew updateDaemonJvm` regenerates those URLs — delete them again if you run it.
-- **No Git LFS.** See below.
+- **No Git LFS on the release path.** See below.
 
 `dependencyLocking { lockAllConfigurations() }` + `app/gradle.lockfile` is an asset here: it pins every
 resolved dependency version, so F-Droid's rebuild resolves exactly what we did.
 
-## Git LFS is banned in this repo
+## No Git LFS for anything the release build reads
 
 `*.tflite` used to be tracked in Git LFS. It is not, and must not be again. F-Droid's buildserver has no
 LFS support ([fdroidserver#1190](https://gitlab.com/fdroid/fdroidserver/-/issues/1190), open since 2024),
@@ -151,6 +152,14 @@ degrade to allow-all on an unreadable model *by design*. The build would succeed
 unmoderated app that also fails byte-comparison. The `checkModerationModels` task
 (`app/build.gradle.kts`, wired into `preBuild`) hard-fails on a stub or a sub-1 MB model so this can never
 regress silently.
+
+**The one LFS rule is test-only:** the Compose preview screenshot references
+(`app/src/screenshotTest*/reference/**/*.png`, ADR 2026-10.gtmm). No release task reads them, so F-Droid's clone
+gets pointer files it never opens. That is measured, not assumed: an `assembleRelease` with every reference
+swapped for its LFS pointer — a clean build, as F-Droid runs it — produced the same APK sha256 as a build from
+the real PNGs. Keep the `.gitattributes` pattern that narrow. Anything a release task reads, or anything a
+`preBuild` dependency checks, stays a plain blob; if a future LFS candidate is a release input, it is a plain
+blob too, whatever its size.
 
 ## The F-Droid source scanner flagged TensorFlow Lite — and the from-source replacement is broken
 

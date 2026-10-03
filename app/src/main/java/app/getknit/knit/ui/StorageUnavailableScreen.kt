@@ -143,6 +143,6 @@ private val PROGRESS_SIZE = 18.dp
 @Preview(name = "Light")
 @Preview(name = "Dark", uiMode = Configuration.UI_MODE_NIGHT_YES)
 @Composable
-private fun StorageUnavailableScreenPreview() {
+fun StorageUnavailableScreenPreview() {
     KnitPreview { StorageUnavailableScreen(trying = false, onRetry = {}, onStartOver = {}) }
 }

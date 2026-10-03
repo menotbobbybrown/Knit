@@ -698,7 +698,7 @@ private fun batteryText(battery: BoardBattery): String {
 
 @Preview(showBackground = true)
 @Composable
-private fun LoraRadioScreenPreview() =
+fun LoraRadioScreenPreview() =
     KnitPreview {
         LoraRadioScreenContent(
             state =
