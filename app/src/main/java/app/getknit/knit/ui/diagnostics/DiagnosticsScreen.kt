@@ -438,107 +438,113 @@ private fun MeshControlsSection(
 private fun MetricsSection(metrics: MeshMetrics.Snapshot) {
     val context = LocalContext.current
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-        MetricRow(stringResource(R.string.diagnostics_metric_originated), metrics.framesOriginated.toString())
-        MetricRow(stringResource(R.string.diagnostics_metric_delivered), metrics.framesDelivered.toString())
-        MetricRow(stringResource(R.string.diagnostics_metric_relayed), metrics.framesRelayed.toString())
-        MetricRow(stringResource(R.string.diagnostics_metric_handed_on), metrics.framesHandedOn.toString())
-        MetricRow(stringResource(R.string.diagnostics_metric_suppressed), metrics.framesSuppressed.toString())
-        MetricRow(stringResource(R.string.diagnostics_metric_deduped), metrics.framesDeduped.toString())
+        MetricRow(stringResource(R.string.diagnostics_metric_originated), metrics.frames.framesOriginated.toString())
+        MetricRow(stringResource(R.string.diagnostics_metric_delivered), metrics.frames.framesDelivered.toString())
+        MetricRow(stringResource(R.string.diagnostics_metric_relayed), metrics.frames.framesRelayed.toString())
+        MetricRow(stringResource(R.string.diagnostics_metric_handed_on), metrics.frames.framesHandedOn.toString())
+        MetricRow(stringResource(R.string.diagnostics_metric_suppressed), metrics.frames.framesSuppressed.toString())
+        MetricRow(stringResource(R.string.diagnostics_metric_deduped), metrics.frames.framesDeduped.toString())
         MetricRow(
             stringResource(R.string.diagnostics_metric_bytes_sent),
-            Formatter.formatShortFileSize(context, metrics.bytesSent),
+            Formatter.formatShortFileSize(context, metrics.frames.bytesSent),
         )
         // Inbound drops are normally zero; surface a total plus a per-reason breakdown only when any
         // occur, so a staged rollout can spot a version causing frames to be discarded.
-        if (metrics.framesDropped > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_dropped), metrics.framesDropped.toString())
-            metrics.dropsByReason.forEach { (reason, count) ->
+        if (metrics.frames.framesDropped > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_dropped), metrics.frames.framesDropped.toString())
+            metrics.frames.dropsByReason.forEach { (reason, count) ->
                 MetricRow("   ${reason.name}", count.toString())
             }
         }
         // Key recovery (inbound key-request): surfaced only once it's been exercised, so a mesh that never
         // hit a missing-key drop stays uncluttered. A rising NO_SENDER_KEY drop with a matching rise in
         // recovered keys is the signal that the gap is self-healing rather than losing frames.
-        if (metrics.keyRequestsSent > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_key_requests), metrics.keyRequestsSent.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_keys_served), metrics.keysServed.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_keys_recovered), metrics.keysRecovered.toString())
+        if (metrics.keys.keyRequestsSent > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_key_requests), metrics.keys.keyRequestsSent.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_keys_served), metrics.keys.keysServed.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_keys_recovered), metrics.keys.keysRecovered.toString())
         }
-        if (metrics.introsSent > 0 || metrics.introsAnswered > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_intros_sent), metrics.introsSent.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_intros_answered), metrics.introsAnswered.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_frames_held), metrics.framesHeld.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_frames_replayed), metrics.framesReplayed.toString())
+        if (metrics.keys.introsSent > 0 || metrics.keys.introsAnswered > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_intros_sent), metrics.keys.introsSent.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_intros_answered), metrics.keys.introsAnswered.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_frames_held), metrics.keys.framesHeld.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_frames_replayed), metrics.keys.framesReplayed.toString())
         }
         // Delay-tolerant broadcast/group delivery ticks re-sent to authors that were out of range at delivery
         // time (see AckSync); shown only once it's happened so a mesh that never needed it stays uncluttered.
-        if (metrics.receiptsResent > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_receipts_resent), metrics.receiptsResent.toString())
+        if (metrics.receipts.receiptsResent > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_receipts_resent), metrics.receipts.receiptsResent.toString())
         }
         // Forward-secret DMs (the v2 epoch ratchet): how many sends ratcheted, and how many v2-eligible
         // sends fell back to the static wrap — the fallback should trend to zero as peers upgrade, so a
         // persistent count is the "investigate" signal. Shown only once a DM has been sealed either way.
-        if (metrics.dmSealedV2 > 0 || metrics.dmSealedV1Fallback > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_dms_ratcheted), metrics.dmSealedV2.toString())
-            if (metrics.dmSealedV1Fallback > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_dms_v1_fallback), metrics.dmSealedV1Fallback.toString())
+        if (metrics.seals.dmSealedV2 > 0 || metrics.seals.dmSealedV1Fallback > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_dms_ratcheted), metrics.seals.dmSealedV2.toString())
+            if (metrics.seals.dmSealedV1Fallback > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_dms_v1_fallback), metrics.seals.dmSealedV1Fallback.toString())
             }
         }
         // Forward-secret group messages (the sender-key ratchet) + their seed traffic. Same shape as
         // the DM pair: the v1 fallback should trend to zero as members upgrade — a persistent count means
         // some member is pinning the group at v1 (no capability, no prekey, or undeliverable seeds).
-        if (metrics.groupSealedRatchet > 0 || metrics.groupSealedV1Fallback > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_groups_ratcheted), metrics.groupSealedRatchet.toString())
-            if (metrics.groupSealedV1Fallback > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_groups_v1_fallback), metrics.groupSealedV1Fallback.toString())
+        if (metrics.groups.groupSealedRatchet > 0 || metrics.groups.groupSealedV1Fallback > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_groups_ratcheted), metrics.groups.groupSealedRatchet.toString())
+            if (metrics.groups.groupSealedV1Fallback > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_groups_v1_fallback), metrics.groups.groupSealedV1Fallback.toString())
             }
         }
-        if (metrics.groupSeedsSent > 0 || metrics.groupSeedsAdopted > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_group_seeds_sent), metrics.groupSeedsSent.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_group_seeds_adopted), metrics.groupSeedsAdopted.toString())
+        if (metrics.groups.groupSeedsSent > 0 || metrics.groups.groupSeedsAdopted > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_group_seeds_sent), metrics.groups.groupSeedsSent.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_group_seeds_adopted), metrics.groups.groupSeedsAdopted.toString())
         }
         // Sealed metadata (receipts/reactions as v2 ctl frames). Same fallback semantics as the pairs
         // above: a persistent fallback count means some private-context receipt/reaction still walks
         // the mesh cleartext (incapable peer, unsealable group).
-        if (metrics.receiptsSealed > 0 || metrics.receiptsSealedFallback > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_receipts_sealed), metrics.receiptsSealed.toString())
-            if (metrics.receiptsSealedFallback > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_receipts_sealed_fallback), metrics.receiptsSealedFallback.toString())
+        if (metrics.receipts.receiptsSealed > 0 || metrics.receipts.receiptsSealedFallback > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_receipts_sealed), metrics.receipts.receiptsSealed.toString())
+            if (metrics.receipts.receiptsSealedFallback > 0) {
+                MetricRow(
+                    stringResource(R.string.diagnostics_metric_receipts_sealed_fallback),
+                    metrics.receipts.receiptsSealedFallback.toString(),
+                )
             }
-            if (metrics.receiptsCustodied > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_receipts_custodied), metrics.receiptsCustodied.toString())
+            if (metrics.receipts.receiptsCustodied > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_receipts_custodied), metrics.receipts.receiptsCustodied.toString())
             }
         }
-        if (metrics.reactionsSealed > 0 || metrics.reactionsSealedFallback > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_reactions_sealed), metrics.reactionsSealed.toString())
-            if (metrics.reactionsSealedFallback > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_reactions_sealed_fallback), metrics.reactionsSealedFallback.toString())
+        if (metrics.seals.reactionsSealed > 0 || metrics.seals.reactionsSealedFallback > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_reactions_sealed), metrics.seals.reactionsSealed.toString())
+            if (metrics.seals.reactionsSealedFallback > 0) {
+                MetricRow(
+                    stringResource(R.string.diagnostics_metric_reactions_sealed_fallback),
+                    metrics.seals.reactionsSealedFallback.toString(),
+                )
             }
         }
         // The Internet (spool) plane, shown only once it has done anything — it is off by default, so a
         // mesh-only install never sees these rows. `bridged` is the payoff (frames that reached us with no
         // radio in range); `quarantined` should stay at 0, and a rising count means some uploader is
         // putting blobs into a scope that fail validation (spec §9.3).
-        if (metrics.spoolPushed > 0 || metrics.spoolBridged > 0 || metrics.spoolInvalid > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_spool_pushed), metrics.spoolPushed.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_spool_bridged), metrics.spoolBridged.toString())
-            if (metrics.spoolInvalid > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_spool_invalid), metrics.spoolInvalid.toString())
+        if (metrics.spool.spoolPushed > 0 || metrics.spool.spoolBridged > 0 || metrics.spool.spoolInvalid > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_spool_pushed), metrics.spool.spoolPushed.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_spool_bridged), metrics.spool.spoolBridged.toString())
+            if (metrics.spool.spoolInvalid > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_spool_invalid), metrics.spool.spoolInvalid.toString())
             }
-            if (metrics.spoolErrors > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_spool_errors), metrics.spoolErrors.toString())
+            if (metrics.spool.spoolErrors > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_spool_errors), metrics.spool.spoolErrors.toString())
             }
             // Attachments (spec §9.5) get their own rows: they are counted in chunks out and whole
             // images in, which is the difference between "an upload is progressing" and "a photo arrived".
-            if (metrics.spoolAttachPushed > 0 || metrics.spoolAttachPulled > 0 || metrics.spoolAttachDeferred > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_spool_attach_pushed), metrics.spoolAttachPushed.toString())
-                MetricRow(stringResource(R.string.diagnostics_metric_spool_attach_pulled), metrics.spoolAttachPulled.toString())
+            if (metrics.spool.spoolAttachPushed > 0 || metrics.spool.spoolAttachPulled > 0 || metrics.spool.spoolAttachDeferred > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_spool_attach_pushed), metrics.spool.spoolAttachPushed.toString())
+                MetricRow(stringResource(R.string.diagnostics_metric_spool_attach_pulled), metrics.spool.spoolAttachPulled.toString())
                 // Deferrals are the difference between "the relay isn't carrying this photo" and "the
                 // radios still are" — without the row the gate is indistinguishable from a broken upload.
-                if (metrics.spoolAttachDeferred > 0) {
+                if (metrics.spool.spoolAttachDeferred > 0) {
                     MetricRow(
                         stringResource(R.string.diagnostics_metric_spool_attach_deferred),
-                        metrics.spoolAttachDeferred.toString(),
+                        metrics.spool.spoolAttachDeferred.toString(),
                     )
                 }
             }
@@ -546,37 +552,37 @@ private fun MetricsSection(metrics: MeshMetrics.Snapshot) {
         // The LoRa (Meshtastic) plane, shown only once it has carried anything — it is off by default and
         // needs a paired board. `received`/`reassembled` are the payoff (a frame that crossed kilometres of
         // LoRa with no radio in range); `tooBig` counts posts too long to fragment into <= 3 packets.
-        if (metrics.loraSent > 0 || metrics.loraReceived > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_lora_sent), metrics.loraSent.toString())
-            MetricRow(stringResource(R.string.diagnostics_metric_lora_received), metrics.loraReceived.toString())
-            if (metrics.loraReassembled > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_reassembled), metrics.loraReassembled.toString())
+        if (metrics.lora.loraSent > 0 || metrics.lora.loraReceived > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_lora_sent), metrics.lora.loraSent.toString())
+            MetricRow(stringResource(R.string.diagnostics_metric_lora_received), metrics.lora.loraReceived.toString())
+            if (metrics.lora.loraReassembled > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_reassembled), metrics.lora.loraReassembled.toString())
             }
-            if (metrics.loraTooBig > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_too_big), metrics.loraTooBig.toString())
+            if (metrics.lora.loraTooBig > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_too_big), metrics.lora.loraTooBig.toString())
             }
-            if (metrics.loraDroppedQueue > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_dropped), metrics.loraDroppedQueue.toString())
+            if (metrics.lora.loraDroppedQueue > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_dropped), metrics.lora.loraDroppedQueue.toString())
             }
-            if (metrics.loraNak > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_nak), metrics.loraNak.toString())
+            if (metrics.lora.loraNak > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_nak), metrics.lora.loraNak.toString())
             }
             // Sealed DM-form frames (ADR 039): a DM that crossed kilometres with no radio in range.
-            if (metrics.loraDmSent > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_dm_sent), metrics.loraDmSent.toString())
+            if (metrics.lora.loraDmSent > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_dm_sent), metrics.lora.loraDmSent.toString())
             }
-            if (metrics.loraDmReceived > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_dm_received), metrics.loraDmReceived.toString())
+            if (metrics.lora.loraDmReceived > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_dm_received), metrics.lora.loraDmReceived.toString())
             }
-            if (metrics.loraReoffered > 0) {
-                MetricRow(stringResource(R.string.diagnostics_metric_lora_reoffered), metrics.loraReoffered.toString())
+            if (metrics.lora.loraReoffered > 0) {
+                MetricRow(stringResource(R.string.diagnostics_metric_lora_reoffered), metrics.lora.loraReoffered.toString())
             }
         }
         // Bluetooth connect failures: shown only once any occur, with a per-reason breakdown, so an
         // intermittent "can link one peer but not the second" is visible and attributable (RADIO vs other).
-        if (metrics.btConnectFails > 0) {
-            MetricRow(stringResource(R.string.diagnostics_metric_bt_connect_fails), metrics.btConnectFails.toString())
-            metrics.btConnectFailsByReason.forEach { (reason, count) ->
+        if (metrics.bluetooth.btConnectFails > 0) {
+            MetricRow(stringResource(R.string.diagnostics_metric_bt_connect_fails), metrics.bluetooth.btConnectFails.toString())
+            metrics.bluetooth.btConnectFailsByReason.forEach { (reason, count) ->
                 MetricRow("   ${reason.name}", count.toString())
             }
         }
@@ -1212,13 +1218,16 @@ fun MetricsSectionPopulatedPreview() =
         MetricsSection(
             metrics =
                 MeshMetrics.Snapshot(
-                    framesOriginated = 128,
-                    framesDelivered = 96,
-                    framesRelayed = 1_024,
-                    framesHandedOn = 7,
-                    framesSuppressed = 12,
-                    framesDeduped = 340,
-                    bytesSent = 2_500_000,
+                    frames =
+                        MeshMetrics.Snapshot.Frames(
+                            framesOriginated = 128,
+                            framesDelivered = 96,
+                            framesRelayed = 1_024,
+                            framesHandedOn = 7,
+                            framesSuppressed = 12,
+                            framesDeduped = 340,
+                            bytesSent = 2_500_000,
+                        ),
                 ),
         )
     }
@@ -1229,15 +1238,7 @@ fun MetricsSectionEmptyPreview() =
     KnitPreview {
         MetricsSection(
             metrics =
-                MeshMetrics.Snapshot(
-                    framesOriginated = 0,
-                    framesDelivered = 0,
-                    framesRelayed = 0,
-                    framesHandedOn = 0,
-                    framesSuppressed = 0,
-                    framesDeduped = 0,
-                    bytesSent = 0,
-                ),
+                MeshMetrics.Snapshot(),
         )
     }
 
@@ -1424,13 +1425,16 @@ fun DiagnosticsScreenPopulatedPreview() =
                         ),
                     metrics =
                         MeshMetrics.Snapshot(
-                            framesOriginated = 128,
-                            framesDelivered = 96,
-                            framesRelayed = 1_024,
-                            framesHandedOn = 7,
-                            framesSuppressed = 12,
-                            framesDeduped = 340,
-                            bytesSent = 2_500_000,
+                            frames =
+                                MeshMetrics.Snapshot.Frames(
+                                    framesOriginated = 128,
+                                    framesDelivered = 96,
+                                    framesRelayed = 1_024,
+                                    framesHandedOn = 7,
+                                    framesSuppressed = 12,
+                                    framesDeduped = 340,
+                                    bytesSent = 2_500_000,
+                                ),
                         ),
                     transports =
                         listOf(

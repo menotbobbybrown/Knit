@@ -120,7 +120,7 @@ class GroupFirstMessageLabTest {
                 lab.tryAwait(1) { if (bob.groupShape(groupId) != null) 1 else 0 },
             )
             assertTrue("bob never committed the seed's chain", lab.tryAwait(1) { if (bob.holdsGroupChainFrom(groupId, alice)) 1 else 0 })
-            assertEquals(0L, bob.metrics.snapshot().groupSeedsHeld)
+            assertEquals(0L, bob.metrics.groups().groupSeedsHeld)
 
             bob.restart() // drops the link and, with it, the still-held group frame
             lab.link(alice, bob)

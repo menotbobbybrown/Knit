@@ -76,7 +76,7 @@ class KeyExchangeLabTest {
                 "carol never asked for the key",
                 lab.tryAwait(1) {
                     carol.metrics
-                        .snapshot()
+                        .keys()
                         .keyRequestsSent
                         .toInt()
                 },
@@ -85,7 +85,7 @@ class KeyExchangeLabTest {
                 "bob never served it",
                 lab.tryAwait(1) {
                     bob.metrics
-                        .snapshot()
+                        .keys()
                         .keysServed
                         .toInt()
                 },
@@ -106,8 +106,8 @@ class KeyExchangeLabTest {
             val short = bob.custodyIds() - carol.custodyIds()
             assertTrue("carol is short nothing bob carries, got $short", short.isEmpty())
             val snap = carol.metrics.snapshot()
-            assertEquals("one frame parked, one replayed", 1L to 1L, snap.framesHeld to snap.framesReplayed)
-            assertEquals("the missing key was recovered", 1L, snap.keysRecovered)
+            assertEquals("one frame parked, one replayed", 1L to 1L, snap.keys.framesHeld to snap.keys.framesReplayed)
+            assertEquals("the missing key was recovered", 1L, snap.keys.keysRecovered)
             assertEquals("Alice", carol.peer(alice)?.name)
         }
 

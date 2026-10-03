@@ -238,7 +238,7 @@ class SideChannelLabTest {
         }
 
     /** How many frames this node has parked for a sender key it does not hold (`framesHeld`). */
-    private fun LabNode.heldForKey(): Int = metrics.snapshot().framesHeld.toInt()
+    private fun LabNode.heldForKey(): Int = metrics.keys().framesHeld.toInt()
 
     private companion object {
         /** Random letters deflate to ~4.7 bits each, so this many stay past `FastFrameCodec.MAX_PARTS` pages. */

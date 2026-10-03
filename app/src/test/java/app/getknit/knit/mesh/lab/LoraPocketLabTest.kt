@@ -2,7 +2,9 @@ package app.getknit.knit.mesh.lab
 
 import app.getknit.knit.data.message.Conversations
 import app.getknit.knit.data.message.DeliveryPlane
+import app.getknit.knit.mesh.StoreDigest
 import app.getknit.knit.mesh.lora.FakeMeshtasticAir
+import app.getknit.knit.mesh.lora.LoraGatewayPolicy.Role
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -77,9 +79,11 @@ class LoraPocketLabTest {
             assertTrue(bob.sendRoom("from pocket a"))
             val post = bob.ownMessageId(Conversations.NEARBY, "from pocket a")
             assertTrue("dave never heard bob's post", lab.tryAwait(1) { dave.roomPosts()[bob.nodeId]?.size ?: 0 })
-            assertTrue("alice's board carried it", alice.loraTx("fanout:chat") >= 1)
-            assertTrue("carol's board heard it", carol.metrics.snapshot().loraReceived >= 1)
-            assertEquals("bob has no board", 0L, bob.metrics.snapshot().loraSent)
+            // Waited, not read: the board logs its `lora tx` line after the air already holds the packet, so Dave can
+            // have the post first.
+            assertTrue("alice's board carried it", lab.tryAwait(1) { alice.loraTx("fanout:chat") })
+            assertTrue("carol's board heard it", carol.metrics.lora().loraReceived >= 1)
+            assertEquals("bob has no board", 0L, bob.metrics.lora().loraSent)
 
             // Custody agrees within a pocket, never across: a DM-form frame to a linked peer (Alice's own
             // tick to Bob) never rides the board. The far pocket's ticks are the next scenario's subject.
@@ -129,7 +133,7 @@ class LoraPocketLabTest {
             lab.await(1) { bob.decrypted(bob.dmWith(alice)).size }
             assertTrue(bob.sendDm(alice, "and back"))
             lab.assertConverged(listOf(alice, bob), atLeast = 2) { it.dmWith(if (it === alice) bob else alice) }
-            assertTrue("the gate never fired", alice.metrics.snapshot().loraSkippedLinked >= 1)
+            assertTrue("the gate never fired", alice.metrics.lora().loraSkippedLinked >= 1)
             assertEquals("nothing of the DM went on the air: ${alice.loraLog}", 0, alice.loraTx("far:chat"))
             assertEquals("nothing of the reply went on the air: ${bob.loraLog}", 0, bob.loraTx("far:chat"))
         }
@@ -155,7 +159,7 @@ class LoraPocketLabTest {
             air.lossy = { _, _ -> false }
 
             assertTrue("the backfill never repaired it", lab.tryAwait(1) { carol.roomPosts()[alice.nodeId]?.size ?: 0 })
-            assertTrue("it came as a bridge serve", alice.metrics.snapshot().loraBridged >= 1)
+            assertTrue("it came as a bridge serve", alice.metrics.lora().loraBridged >= 1)
             lab.assertConverged(listOf(alice, carol), atLeast = 1) { Conversations.NEARBY }
         }
 
@@ -169,14 +173,20 @@ class LoraPocketLabTest {
             val carol = lab.node("carol", quick, air = air).apply { setDisplayName("Carol") }
             meetThenSplit(listOf(alice, amber, carol), keep = listOf(alice to amber))
 
-            assertTrue("no board went passive", lab.tryAwait(1) { listOf(alice, amber).count { it.metrics.snapshot().loraPassive > 0 } })
-            val passive = listOf(alice, amber).single { it.metrics.snapshot().loraPassive > 0 }
-            val active = listOf(alice, amber).single { it !== passive }
+            // The lowest publisher key speaks for a pocket (`LoraGatewayPolicy`), so of the pair still linked the
+            // higher key stands down once it hears the other's OFFER. Not `loraPassive`: it counts every transmit a
+            // board skipped since it booted, and in the three-board meeting both of these skip whenever Carol's key
+            // is the lowest, so the board the pair then elects keeps its count.
+            val (active, passive) = listOf(alice, amber).sortedBy { StoreDigest.hash64(it.nodeId) }
+            assertTrue(
+                "${passive.name} never stood down for ${active.name} (alice ${alice.loraRole()}, amber ${amber.loraRole()})",
+                lab.tryAwait(1) { if (passive.loraRole() == Role.PASSIVE && active.loraRole() == Role.ACTIVE) 1 else 0 },
+            )
             val activeFanned = active.loraTx("fanout:chat")
 
             assertTrue(passive.sendRoom("from the passive board's phone"))
             assertTrue("carol never heard it", lab.tryAwait(1) { carol.roomPosts()[passive.nodeId]?.size ?: 0 })
-            assertTrue("the active board carried it", active.loraTx("fanout:chat") > activeFanned)
+            assertTrue("the active board carried it", lab.tryAwait(activeFanned + 1) { active.loraTx("fanout:chat") })
             assertEquals("the passive board fanned nothing", 0, passive.loraTx("fanout:chat"))
         }
 
@@ -206,4 +216,7 @@ class LoraPocketLabTest {
             // the lab does not shorten yet; the oracle waits it out.
             lab.assertConverged(listOf(alice, bob), atLeast = 3, timeoutMs = 60_000) { it.dmWith(if (it === alice) bob else alice) }
         }
+
+    /** The board's gateway role, the field its plane transmits by (`LoraMeshTransport.gatewayRole`), not its status. */
+    private fun LabNode.loraRole(): Role = checkNotNull(lora) { "$name has no board" }.gatewayRole
 }

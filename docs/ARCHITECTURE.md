@@ -277,8 +277,12 @@ asserted from the same unit tests as `MeshRouter`). It is a Koin singleton injec
 `framesDelivered`, `framesRelayed`, `framesSuppressed`, `framesDeduped`, `bytesSent` — plus a
 `DropReason` breakdown and the key-exchange / pending-inbound recovery counters
 (`keyRequestsSent`/`keysServed`/`keysRecovered`, `framesHeld`/`framesReplayed`) surfaced in the
-Diagnostics screen; `snapshot()` returns an immutable `Snapshot`. `MeshManager.logMetricsPeriodically()` logs a snapshot every
-`60_000 ms`. The `framesSuppressed : framesRelayed` ratio quantifies how much rebroadcasting the
+Diagnostics screen; `snapshot()` returns an immutable `Snapshot`, and `frames()`, `lora()` and the rest read one of
+its groups alone. The groups (`frames`, `keys`, `seals`, `receipts`, `groups`, `files`, `bluetooth`, `nan`, `fast`,
+`spool`, `lora`, `meshtastic`) exist because a flat data class of 129 counters reached the JVM's 255-slot method limit,
+which fails at class load rather than at compile time; `MeshMetricsTest` holds each group to half of it. A counter keeps
+its full name inside its group, the name the debug bridge's STATE uses as its key.
+`MeshManager.logMetricsPeriodically()` logs a snapshot every `60_000 ms`. The `framesSuppressed : framesRelayed` ratio quantifies how much rebroadcasting the
 overhear suppression eliminated; `bytesSent` tracks the CBOR byte win.
 
 ### 3.5 Orchestration (`mesh/MeshManager.kt`)

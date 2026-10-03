@@ -521,9 +521,9 @@ class MeshManagerTest {
 
         /** Runs [MeshManager.heal] and waits for its basket to run to the end (`healsCompleted`), as the lab does. */
         suspend fun healAndAwait() {
-            val before = metrics.snapshot().healsCompleted.toInt()
+            val before = metrics.frames().healsCompleted.toInt()
             manager.heal()
-            await(before + 1) { metrics.snapshot().healsCompleted.toInt() }
+            await(before + 1) { metrics.frames().healsCompleted.toInt() }
         }
 
         /** Every PROFILE frame that reached custody, oldest first — what a late joiner would be re-served. */
@@ -1339,8 +1339,8 @@ class MeshManagerTest {
             val tick = rig.sentChatFrames().single()
             assertEquals(rig.bob.nodeId, tick.recipientId)
             assertEquals(listOf(FanoutHint.TICK), rig.transport.longRangeHints)
-            assertEquals(1L, rig.metrics.snapshot().receiptsCustodied)
-            assertEquals(1L, rig.metrics.snapshot().receiptsCoalesced)
+            assertEquals(1L, rig.metrics.receipts().receiptsCustodied)
+            assertEquals(1L, rig.metrics.receipts().receiptsCoalesced)
             assertTrue(
                 rig.manager.dmAcks
                     .pending(rig.bob.nodeId)
@@ -1385,7 +1385,7 @@ class MeshManagerTest {
                     .pending(rig.bob.nodeId)
                     .isEmpty(),
             )
-            assertEquals(2L, rig.metrics.snapshot().receiptsCoalesced)
+            assertEquals(2L, rig.metrics.receipts().receiptsCoalesced)
             assertEquals("a reply is content, never a tick", listOf(FanoutHint.CONTENT, FanoutHint.CONTENT), rig.transport.longRangeHints)
 
             val carol = party()
@@ -1394,7 +1394,7 @@ class MeshManagerTest {
             assertTrue(rig.manager.sendChat("plain", recipientId = carol.nodeId))
             advanceUntilIdle()
             assertEquals(listOf("c-1"), rig.manager.dmAcks.pending(carol.nodeId))
-            assertEquals(2L, rig.metrics.snapshot().receiptsCoalesced)
+            assertEquals(2L, rig.metrics.receipts().receiptsCoalesced)
         }
 
     /**
@@ -1413,8 +1413,8 @@ class MeshManagerTest {
             assertTrue(rig.manager.sendChat("plain", recipientId = rig.bob.nodeId))
             advanceUntilIdle()
 
-            assertEquals("the DM ack rode", 1L, rig.metrics.snapshot().receiptsCoalesced)
-            assertEquals("and the room ticks filled the rest of the slots", 2L, rig.metrics.snapshot().receiptsRidden)
+            assertEquals("the DM ack rode", 1L, rig.metrics.receipts().receiptsCoalesced)
+            assertEquals("and the room ticks filled the rest of the slots", 2L, rig.metrics.receipts().receiptsRidden)
             assertEquals("nothing left waiting for a carrier", 0, rig.manager.ackSync.ridingFor(rig.bob.nodeId))
         }
 
@@ -1432,8 +1432,8 @@ class MeshManagerTest {
             advanceUntilIdle()
 
             assertEquals("one originated tick, not three", 1, rig.sentChatFrames().size)
-            assertEquals(1L, rig.metrics.snapshot().receiptsCustodied)
-            assertEquals(2L, rig.metrics.snapshot().receiptsRidden)
+            assertEquals(1L, rig.metrics.receipts().receiptsCustodied)
+            assertEquals(2L, rig.metrics.receipts().receiptsRidden)
             assertEquals(0, rig.manager.ackSync.ridingFor(rig.bob.nodeId))
         }
 
@@ -1451,7 +1451,7 @@ class MeshManagerTest {
             advanceUntilIdle()
 
             assertEquals(1, rig.sentChatFrames().size)
-            assertEquals("no room left on a full LoRa tick", 0L, rig.metrics.snapshot().receiptsRidden)
+            assertEquals("no room left on a full LoRa tick", 0L, rig.metrics.receipts().receiptsRidden)
             assertEquals("the riders wait for the next carrier", 5, rig.manager.ackSync.ridingFor(rig.bob.nodeId))
         }
 
@@ -1469,8 +1469,8 @@ class MeshManagerTest {
             advanceUntilIdle()
 
             assertEquals("one originated tick", 1, rig.sentChatFrames().size)
-            assertEquals(1L, rig.metrics.snapshot().receiptsCustodied)
-            assertEquals(1L, rig.metrics.snapshot().receiptsRidden)
+            assertEquals(1L, rig.metrics.receipts().receiptsCustodied)
+            assertEquals(1L, rig.metrics.receipts().receiptsRidden)
             assertEquals(0, rig.manager.ackSync.ridingFor(rig.bob.nodeId))
         }
 
@@ -1492,7 +1492,7 @@ class MeshManagerTest {
             assertFalse("point-to-point, never custodied", wire.relay)
             assertEquals(FrameType.CHAT, WireCodec.decodeEnvelope(wire.signed)!!.type)
             assertEquals("nothing originated into custody", 0, rig.sentChatFrames().size)
-            assertEquals(1L, rig.metrics.snapshot().receiptsSealed)
+            assertEquals(1L, rig.metrics.receipts().receiptsSealed)
             assertEquals(0, rig.manager.ackSync.ridingFor(rig.bob.nodeId))
         }
 
@@ -1507,7 +1507,7 @@ class MeshManagerTest {
             advanceUntilIdle()
 
             assertTrue(rig.transport.fastSends.isEmpty())
-            assertEquals("no chain key spent on nobody", 0L, rig.metrics.snapshot().receiptsSealed)
+            assertEquals("no chain key spent on nobody", 0L, rig.metrics.receipts().receiptsSealed)
             assertEquals(1, rig.manager.ackSync.ridingFor(rig.bob.nodeId))
         }
 
@@ -1551,7 +1551,7 @@ class MeshManagerTest {
             val enc = WireCodec.decodePayload<ChatContent>(rig.sentChatFrames().single().payload)!!.enc!!
             assertEquals(1, enc.v)
             assertEquals("given back for the standalone tick", listOf("in-1"), rig.manager.dmAcks.pending(rig.bob.nodeId))
-            assertEquals(0L, rig.metrics.snapshot().receiptsCoalesced)
+            assertEquals(0L, rig.metrics.receipts().receiptsCoalesced)
         }
 
     @Test
@@ -1573,7 +1573,7 @@ class MeshManagerTest {
             assertNotNull("the first frame carries the X3DH init", header.init)
             assertEquals(1, header.init!!.pkid)
             assertFalse("the stored row is not pendingKey", rig.saved.single().pendingKey)
-            assertEquals(1L, rig.metrics.snapshot().dmSealedV2)
+            assertEquals(1L, rig.metrics.seals().dmSealedV2)
 
             // A second DM continues the chain in the same epoch, init still attached (unconfirmed).
             assertTrue(rig.manager.sendChat("again", recipientId = rig.bob.nodeId))
@@ -1602,8 +1602,8 @@ class MeshManagerTest {
             assertEquals("the nonce is derived, the field rides empty", 0, enc.nonce.size)
             assertTrue(enc.keys.isEmpty())
             assertNotNull(enc.r)
-            assertEquals(1L, rig.metrics.snapshot().dmSealedV3)
-            assertEquals("v3 is still a ratchet seal", 1L, rig.metrics.snapshot().dmSealedV2)
+            assertEquals(1L, rig.metrics.seals().dmSealedV3)
+            assertEquals("v3 is still a ratchet seal", 1L, rig.metrics.seals().dmSealedV2)
 
             // Inline acks ride the v3 arm too, and are taken out of the coalescer like on v2.
             rig.manager.dmAcks.hold(rig.bob.nodeId, FrameId.new())
@@ -1614,7 +1614,7 @@ class MeshManagerTest {
                     .pending(rig.bob.nodeId)
                     .isEmpty(),
             )
-            assertEquals(1L, rig.metrics.snapshot().receiptsCoalesced)
+            assertEquals(1L, rig.metrics.receipts().receiptsCoalesced)
         }
 
     /** ADR 059: the coalesced LoRa tick toward a v3 author is v3 but ORIGINATED — flooded, custodied, and therefore signed. */
@@ -1635,8 +1635,8 @@ class MeshManagerTest {
             val enc = WireCodec.decodePayload<ChatContent>(rig.sentChatFrames().single().payload)!!.enc!!
             assertEquals(EncEnvelope.VERSION_DM_V3, enc.v)
             assertEquals(0, enc.nonce.size)
-            assertEquals(1L, rig.metrics.snapshot().receiptsCustodied)
-            assertEquals(0L, rig.metrics.snapshot().ticksUnsigned)
+            assertEquals(1L, rig.metrics.receipts().receiptsCustodied)
+            assertEquals(0L, rig.metrics.receipts().ticksUnsigned)
         }
 
     /** A tick acking an id the compact codec cannot carry falls back to v2 — and a v2 tick is never unsigned. */
@@ -1653,7 +1653,7 @@ class MeshManagerTest {
             val enc = WireCodec.decodePayload<ChatContent>(rig.sentChatFrames().single().payload)!!.enc!!
             assertEquals(EncEnvelope.VERSION_RATCHET, enc.v)
             assertEquals(12, enc.nonce.size)
-            assertEquals(0L, rig.metrics.snapshot().dmSealedV3)
+            assertEquals(0L, rig.metrics.seals().dmSealedV3)
         }
 
     @Test
@@ -1669,7 +1669,7 @@ class MeshManagerTest {
             assertEquals(1, enc.v)
             assertNull(enc.r)
             assertTrue(enc.keys.isNotEmpty())
-            assertEquals(0L, rig.metrics.snapshot().dmSealedV2)
+            assertEquals(0L, rig.metrics.seals().dmSealedV2)
         }
 
     @Test
@@ -1690,7 +1690,7 @@ class MeshManagerTest {
 
             val enc = WireCodec.decodePayload<ChatContent>(rig.sentChatFrames().single().payload)!!.enc!!
             assertEquals(1, enc.v)
-            assertEquals(1L, rig.metrics.snapshot().dmSealedV1Fallback)
+            assertEquals(1L, rig.metrics.seals().dmSealedV1Fallback)
         }
 
     // --- the group sender-key send gate ---
@@ -1734,8 +1734,8 @@ class MeshManagerTest {
             // The minted epoch's seed rode ahead, pairwise, as a v2 ctl DM.
             val seedDm = frames.single { it.recipientId == rig.bob.nodeId }
             assertEquals(EncEnvelope.VERSION_RATCHET, WireCodec.decodePayload<ChatContent>(seedDm.payload)!!.enc!!.v)
-            assertEquals(1L, rig.metrics.snapshot().groupSealedRatchet)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsSent)
+            assertEquals(1L, rig.metrics.groups().groupSealedRatchet)
+            assertEquals(1L, rig.metrics.groups().groupSeedsSent)
             assertFalse("the stored group row is never pendingKey", rig.saved.single().pendingKey)
         }
 
@@ -1813,7 +1813,7 @@ class MeshManagerTest {
             val second = WireCodec.decodePayload<ChatContent>(frames.last { it.group != null }.payload)!!.enc!!.g!!
             assertEquals(1, second.se)
             assertEquals(1, second.n)
-            assertEquals(2L, rig.metrics.snapshot().groupSealedRatchet)
+            assertEquals(2L, rig.metrics.groups().groupSealedRatchet)
         }
 
     @Test
@@ -1838,9 +1838,9 @@ class MeshManagerTest {
             assertEquals(1, enc.v)
             assertNull(enc.g)
             assertEquals(2, enc.keys.size)
-            assertEquals(0L, rig.metrics.snapshot().groupSealedRatchet)
+            assertEquals(0L, rig.metrics.groups().groupSealedRatchet)
             // Ineligible (not eligible-but-fell-back): the fallback counter stays untouched — DM semantics.
-            assertEquals(0L, rig.metrics.snapshot().groupSealedV1Fallback)
+            assertEquals(0L, rig.metrics.groups().groupSealedV1Fallback)
         }
 
     @Test
@@ -1959,7 +1959,7 @@ class MeshManagerTest {
                 seedsBefore + 1,
                 rig.sentChatFrames().count { it.recipientId == rig.bob.nodeId },
             )
-            assertEquals(2L, rig.metrics.snapshot().groupSeedsSent)
+            assertEquals(2L, rig.metrics.groups().groupSeedsSent)
         }
 
     /**
@@ -2030,7 +2030,7 @@ class MeshManagerTest {
             assertTrue("the DM form carries the epoch-ratchet header", enc.r != null)
             // The local row applied optimistically with the same LWW clock the frame carries.
             coVerify(exactly = 1) { rig.reactions.apply(ReactionEntity("m1", rig.me.nodeId, "👍", rig.now)) }
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealed)
+            assertEquals(1L, rig.metrics.seals().reactionsSealed)
         }
 
     @Test
@@ -2045,7 +2045,7 @@ class MeshManagerTest {
             val reaction = rig.sentReactionFrames().single()
             assertEquals("m1", WireCodec.decodePayload<ReactionContent>(reaction.payload)!!.messageId)
             assertTrue(rig.sentChatFrames().isEmpty())
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealedFallback)
+            assertEquals(1L, rig.metrics.seals().reactionsSealedFallback)
         }
 
     @Test
@@ -2066,7 +2066,7 @@ class MeshManagerTest {
             assertEquals(EncEnvelope.VERSION_RATCHET, enc.v)
             assertTrue("the group form carries the sender-key header", enc.g != null)
             assertEquals(1, frames.count { it.recipientId == rig.bob.nodeId })
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealed)
+            assertEquals(1L, rig.metrics.seals().reactionsSealed)
         }
 
     @Test
@@ -2081,7 +2081,7 @@ class MeshManagerTest {
 
             assertTrue(rig.sentChatFrames().isEmpty())
             assertEquals(1, rig.sentReactionFrames().size)
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealedFallback)
+            assertEquals(1L, rig.metrics.seals().reactionsSealedFallback)
         }
 
     @Test
@@ -2094,7 +2094,7 @@ class MeshManagerTest {
 
             assertEquals(1, rig.sentReactionFrames().size)
             assertTrue(rig.sentChatFrames().isEmpty())
-            assertEquals(0L, rig.metrics.snapshot().reactionsSealedFallback)
+            assertEquals(0L, rig.metrics.seals().reactionsSealedFallback)
         }
 
     @Test
@@ -2109,7 +2109,7 @@ class MeshManagerTest {
 
             coVerify(exactly = 1) { rig.reactions.apply(ReactionEntity("m1", rig.me.nodeId, null, rig.now)) }
             assertTrue(rig.sentReactionFrames().isEmpty())
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealed)
+            assertEquals(1L, rig.metrics.seals().reactionsSealed)
         }
 
     @Test
@@ -2135,7 +2135,7 @@ class MeshManagerTest {
 
             assertTrue("no v1 EncEnvelope for a ctl payload, ever", rig.sentChatFrames().isEmpty())
             assertEquals(1, rig.sentReactionFrames().size)
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealedFallback)
+            assertEquals(1L, rig.metrics.seals().reactionsSealedFallback)
         }
 
     @Test
@@ -2153,8 +2153,8 @@ class MeshManagerTest {
             coVerify(exactly = 0) { rig.reactions.apply(any()) }
             assertTrue(rig.sentChatFrames().isEmpty())
             assertTrue(rig.sentReactionFrames().isEmpty())
-            assertEquals(0L, rig.metrics.snapshot().reactionsSealed)
-            assertEquals(0L, rig.metrics.snapshot().reactionsSealedFallback)
+            assertEquals(0L, rig.metrics.seals().reactionsSealed)
+            assertEquals(0L, rig.metrics.seals().reactionsSealedFallback)
         }
 
     @Test
@@ -2171,7 +2171,7 @@ class MeshManagerTest {
             coVerify(exactly = 1) { rig.reactions.apply(ReactionEntity("m1", rig.me.nodeId, kiss, rig.now)) }
             assertTrue(rig.sentReactionFrames().isEmpty())
             assertEquals(1, rig.sentChatFrames().size)
-            assertEquals(1L, rig.metrics.snapshot().reactionsSealed)
+            assertEquals(1L, rig.metrics.seals().reactionsSealed)
         }
 
     private companion object {
@@ -2366,7 +2366,7 @@ class MeshManagerTest {
             rig.await(1) { rig.custodiedProfiles().size }
             val healsBefore =
                 rig.metrics
-                    .snapshot()
+                    .frames()
                     .healsCompleted
                     .toInt()
             val sweepsBefore = rig.forwardStore.sweeps.get()
@@ -2382,7 +2382,7 @@ class MeshManagerTest {
             hold.complete(Unit)
             rig.await(healsBefore + 1) {
                 rig.metrics
-                    .snapshot()
+                    .frames()
                     .healsCompleted
                     .toInt()
             }

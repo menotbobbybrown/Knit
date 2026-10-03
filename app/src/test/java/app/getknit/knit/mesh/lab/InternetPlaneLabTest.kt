@@ -156,7 +156,7 @@ class InternetPlaneLabTest {
                 lab.tryAwait(1, timeoutMs = MeshLab.SPOOL_AWAIT_MS) { carol.decrypted(groupId).size },
             )
             assertEquals(alice.groupShape(groupId), carol.groupShape(groupId))
-            assertEquals(0L, carol.metrics.snapshot().groupSeedsHeld)
+            assertEquals(0L, carol.metrics.groups().groupSeedsHeld)
 
             lab.linkAll(alice to carol, bob to carol)
             lab.assertConverged(listOf(alice, bob, carol), atLeast = 1, timeoutMs = MeshLab.SPOOL_AWAIT_MS) { groupId }
@@ -219,7 +219,7 @@ class InternetPlaneLabTest {
                 "the upload was never deferred",
                 lab.tryAwait(1, timeoutMs = MeshLab.SPOOL_AWAIT_MS) {
                     alice.metrics
-                        .snapshot()
+                        .spool()
                         .spoolAttachDeferred
                         .toInt()
                 },
@@ -229,7 +229,7 @@ class InternetPlaneLabTest {
             val sentId = alice.ownMessageId(alice.dmWith(bob), "in range")
             assertTrue(
                 "chunks went up while bob was in range: ${spool.chunksPut}; " +
-                    "alice pushed=${alice.metrics.snapshot().spoolAttachPushed} bob pushed=${bob.metrics.snapshot().spoolAttachPushed} " +
+                    "alice pushed=${alice.metrics.spool().spoolAttachPushed} bob pushed=${bob.metrics.spool().spoolAttachPushed} " +
                     "bob's row came via ${bob.receivedVia(bob.dmWith(alice), sentId)}\n${lab.report(listOf(alice, bob))}",
                 spool.chunksPut.isEmpty(),
             )
@@ -284,7 +284,7 @@ class InternetPlaneLabTest {
             assertTrue(
                 "bob never judged the bytes\n${lab.report(listOf(alice, bob))}",
                 lab.tryAwait(1, timeoutMs = MeshLab.SPOOL_AWAIT_MS) {
-                    bob.metrics.snapshot().let { (it.spoolAttachDeferred + it.spoolAttachPushed).toInt() }
+                    bob.metrics.snapshot().let { (it.spool.spoolAttachDeferred + it.spool.spoolAttachPushed).toInt() }
                 },
             )
             assertTrue(
@@ -359,8 +359,8 @@ class InternetPlaneLabTest {
             lab.awaitDmScope(alice, bob)
             lab.awaitDmScope(bob, alice)
 
-            val suppressed = bob.metrics.snapshot().framesSuppressed
-            val decided = bob.metrics.snapshot().let { it.framesRelayed + it.framesSuppressed }
+            val suppressed = bob.metrics.frames().framesSuppressed
+            val decided = bob.metrics.snapshot().let { it.frames.framesRelayed + it.frames.framesSuppressed }
             // Each DM's spool copy is Bob's first sighting; its radio copy is released a little after his row
             // lands, at a spread of offsets, so some land after the relay is scheduled and inside its 0–150 ms
             // jitter — the window the router's own randomness decides.
@@ -382,14 +382,14 @@ class InternetPlaneLabTest {
             lab.await(decided.toInt() + RADIO_LAG_MS.size) {
                 bob.metrics
                     .snapshot()
-                    .let { it.framesRelayed + it.framesSuppressed }
+                    .let { it.frames.framesRelayed + it.frames.framesSuppressed }
                     .toInt()
             }
             // `decided` can be one short (the pre-loop tick's relay counted after the snapshot), so the count alone
             // may pass before the last radio copy is judged; a drained inbound means every copy has been, and any
             // suppression it caused is counted — both run inline in `handleInbound`.
             bob.transport.awaitInboundDrained()
-            assertEquals("bob cancelled a relay on the spool's copy", suppressed, bob.metrics.snapshot().framesSuppressed)
+            assertEquals("bob cancelled a relay on the spool's copy", suppressed, bob.metrics.frames().framesSuppressed)
             lab.assertConverged(listOf(alice, bob), atLeast = 2 + RADIO_LAG_MS.size, carriers = listOf(carol)) {
                 alice.dmThreadWith(bob)(it)
             }
@@ -553,8 +553,8 @@ class InternetPlaneLabTest {
                 )}, alice=${alice.dmScopeStatus(bob)?.invalidCount} bob=${bob.dmScopeStatus(alice)?.invalidCount}",
                 lab.tryAwait(2, timeoutMs = MeshLab.SPOOL_AWAIT_MS) {
                     (
-                        alice.metrics.snapshot().spoolInvalid +
-                            bob.metrics.snapshot().spoolInvalid
+                        alice.metrics.spool().spoolInvalid +
+                            bob.metrics.spool().spoolInvalid
                     ).toInt()
                 },
             )
@@ -589,8 +589,8 @@ class InternetPlaneLabTest {
             val bothSpoke =
                 lab.tryAwait(1, timeoutMs = MeshLab.SPOOL_AWAIT_MS) {
                     minOf(
-                        alice.metrics.snapshot().let { it.introsSent + it.introsAnswered },
-                        bob.metrics.snapshot().let { it.introsSent + it.introsAnswered },
+                        alice.metrics.snapshot().let { it.keys.introsSent + it.keys.introsAnswered },
+                        bob.metrics.snapshot().let { it.keys.introsSent + it.keys.introsAnswered },
                     ).toInt()
                 }
             assertTrue("a side never sent or answered an intro\n${lab.report(listOf(alice, bob))}", bothSpoke)

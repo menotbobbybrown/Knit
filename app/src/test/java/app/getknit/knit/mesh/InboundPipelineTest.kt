@@ -482,7 +482,7 @@ class InboundPipelineTest {
             kind: TransportKind = TransportKind.Other,
         ) = pipeline.onDeliver(author.sign(env), env, from, kind)
 
-        fun drops(reason: DropReason): Long = metrics.snapshot().dropsByReason[reason] ?: 0L
+        fun drops(reason: DropReason): Long = metrics.frames().dropsByReason[reason] ?: 0L
 
         /** A plaintext broadcast-room chat frame. */
         fun broadcastChat(
@@ -912,7 +912,7 @@ class InboundPipelineTest {
 
             assertNotNull("alice's key should be pinned", rig.peerMap[alice.nodeId]?.pubKey)
             assertEquals("the parked chat should now deliver", "replayed hi", rig.msgMap["c5"]?.body)
-            assertTrue(rig.metrics.snapshot().framesReplayed >= 1)
+            assertTrue(rig.metrics.keys().framesReplayed >= 1)
         }
 
     @Test
@@ -1735,7 +1735,7 @@ class InboundPipelineTest {
             rig.pipeline.onDeliver(alice.sign(env), env, alice.nodeId)
 
             // For an unheld key, onRequest records the wanter and fires an outbound key request to neighbors.
-            assertTrue(rig.metrics.snapshot().keyRequestsSent >= 1)
+            assertTrue(rig.metrics.keys().keyRequestsSent >= 1)
         }
 
     // --- Tier 2: group path (reconcileGroup runs inside the rig's real in-memory Room transaction) ---
@@ -2890,8 +2890,8 @@ class InboundPipelineTest {
             val row = rig.msgMap.values.single()
             assertEquals(alice.nodeId, row.originPeerId)
             assertEquals("the words provably came from her radio", MessageEntity.ORIGIN_SIGNED_BY_CONTACT, row.originSigned)
-            assertEquals(1L, rig.metrics.snapshot().meshPostVerified)
-            assertEquals(1L, rig.metrics.snapshot().meshPostMatched)
+            assertEquals(1L, rig.metrics.meshtastic().meshPostVerified)
+            assertEquals(1L, rig.metrics.meshtastic().meshPostMatched)
         }
 
     @Test
@@ -2910,8 +2910,8 @@ class InboundPipelineTest {
             assertNull("never attributed", row.originPeerId)
             assertEquals(MessageEntity.ORIGIN_SIGNATURE_MISMATCH, row.originSigned)
             assertEquals("Knit a7c3", row.originName)
-            assertEquals(1L, rig.metrics.snapshot().meshPostSignatureMismatch)
-            assertEquals("a mismatch is not a match", 0L, rig.metrics.snapshot().meshPostMatched)
+            assertEquals(1L, rig.metrics.meshtastic().meshPostSignatureMismatch)
+            assertEquals("a mismatch is not a match", 0L, rig.metrics.meshtastic().meshPostMatched)
         }
 
     @Test
@@ -2929,7 +2929,7 @@ class InboundPipelineTest {
             val row = rig.msgMap.values.single()
             assertEquals(alice.nodeId, row.originPeerId)
             assertEquals(MessageEntity.ORIGIN_UNSIGNED, row.originSigned)
-            assertEquals(0L, rig.metrics.snapshot().meshPostVerified)
+            assertEquals(0L, rig.metrics.meshtastic().meshPostVerified)
         }
 
     @Test
@@ -2943,7 +2943,7 @@ class InboundPipelineTest {
             val row = rig.msgMap.values.single()
             assertNull(row.originPeerId)
             assertEquals(MessageEntity.ORIGIN_SIGNED_BY_BOARD, row.originSigned)
-            assertEquals(1L, rig.metrics.snapshot().meshPostBoardVerified)
+            assertEquals(1L, rig.metrics.meshtastic().meshPostBoardVerified)
         }
 
     @Test
@@ -3047,7 +3047,7 @@ class InboundPipelineTest {
             val row = rig.msgMap.values.single()
             assertNull(row.originPeerId)
             assertEquals(MessageEntity.ORIGIN_SIGNATURE_MISMATCH, row.originSigned)
-            assertNull(rig.metrics.snapshot().meshPostRefusedByReason[MESH_POST_BLOCKED_CONTACT])
+            assertNull(rig.metrics.meshtastic().meshPostRefusedByReason[MESH_POST_BLOCKED_CONTACT])
         }
 
     @Test
@@ -3086,7 +3086,7 @@ class InboundPipelineTest {
 
             assertEquals(1, rig.msgMap.size)
             assertTrue("nothing is originated for a heard post", rig.originated.isEmpty())
-            assertEquals(0, rig.metrics.snapshot().receiptsResent)
+            assertEquals(0, rig.metrics.receipts().receiptsResent)
         }
 
     @Test
@@ -3313,7 +3313,7 @@ class InboundPipelineTest {
             assertEquals("the notification is the contact's, keyed like their DM", alice.nodeId, notification.captured.senderId)
             assertEquals("Alice", notification.captured.senderName)
             assertEquals("the words are the whole post", "hi", notification.captured.body)
-            assertEquals(1L, rig.metrics.snapshot().meshPostMatched)
+            assertEquals(1L, rig.metrics.meshtastic().meshPostMatched)
         }
 
     @Test
@@ -3330,7 +3330,7 @@ class InboundPipelineTest {
             advanceUntilIdle()
 
             assertTrue(rig.msgMap.isEmpty())
-            assertEquals(1L, rig.metrics.snapshot().meshPostRefusedByReason[MESH_POST_BLOCKED_CONTACT])
+            assertEquals(1L, rig.metrics.meshtastic().meshPostRefusedByReason[MESH_POST_BLOCKED_CONTACT])
         }
 
     @Test
@@ -5161,7 +5161,7 @@ class InboundPipelineTest {
             val ctlAck = rig.originated.single { it.type == FrameType.CHAT && it.recipientId == alice.nodeId }
             // …custodial like any chat frame, so its sentAt must carry the wall clock (work item #16).
             assertEquals(42L, ctlAck.sentAt)
-            assertEquals(1L, rig.metrics.snapshot().receiptsSealed)
+            assertEquals(1L, rig.metrics.receipts().receiptsSealed)
             // Sealed-era custody contract: the delivered DM stays in our own custody (nobody purges;
             // it ages out on the TTL with every carrier's copy — that convergence IS the retirement).
             assertTrue(rig.forwardStore.has("v2-cap1"))
@@ -5181,7 +5181,7 @@ class InboundPipelineTest {
             rig.deliver(alice, author.dm("v2-ride", "hello"))
 
             assertEquals(1, rig.originated.count { it.type == FrameType.CHAT && it.recipientId == alice.nodeId })
-            assertEquals("both room ticks rode the receipt", 2L, rig.metrics.snapshot().receiptsRidden)
+            assertEquals("both room ticks rode the receipt", 2L, rig.metrics.receipts().receiptsRidden)
             assertEquals("nothing left waiting", 0, rig.ackSync.ridingFor(alice.nodeId))
             rig.ackSync.owe("room-1", alice.nodeId)
             assertEquals("and a re-serve of the post parks nothing", 0, rig.ackSync.ridingFor(alice.nodeId))
@@ -5385,9 +5385,9 @@ class InboundPipelineTest {
             val receiptEnc = checkNotNull(WireCodec.decodePayload<ChatContent>(receipt.payload)?.enc)
             assertEquals(EncEnvelope.VERSION_DM_V3, receiptEnc.v)
             assertEquals(0, receiptEnc.nonce.size)
-            assertEquals(1L, rig.metrics.snapshot().receiptsSealed)
-            assertEquals(1L, rig.metrics.snapshot().dmSealedV3)
-            assertEquals(0L, rig.metrics.snapshot().ticksUnsigned)
+            assertEquals(1L, rig.metrics.receipts().receiptsSealed)
+            assertEquals(1L, rig.metrics.seals().dmSealedV3)
+            assertEquals(0L, rig.metrics.receipts().ticksUnsigned)
         }
 
     /**
@@ -5406,15 +5406,15 @@ class InboundPipelineTest {
 
             assertEquals("hello from the hills", rig.msgMap["lora-1"]?.body)
             assertTrue("no instant receipt", rig.originated.none { it.type == FrameType.CHAT && it.recipientId == alice.nodeId })
-            assertEquals(0L, rig.metrics.snapshot().receiptsSealed)
-            assertEquals(1L, rig.metrics.snapshot().loraTickDeferred)
+            assertEquals(0L, rig.metrics.receipts().receiptsSealed)
+            assertEquals(1L, rig.metrics.lora().loraTickDeferred)
             assertEquals(listOf("lora-1"), rig.dmAcks.pending(alice.nodeId))
 
             // A second DM joins the batch; a re-delivery of the first (the exists-gate) adds nothing.
             rig.deliver(alice, author.dm("lora-2", "still here"), kind = TransportKind.LoRa)
             rig.deliver(alice, author.dm("lora-1", "hello from the hills"), kind = TransportKind.LoRa)
             assertEquals(listOf("lora-1", "lora-2"), rig.dmAcks.pending(alice.nodeId))
-            assertEquals(3L, rig.metrics.snapshot().loraTickDeferred)
+            assertEquals(3L, rig.metrics.lora().loraTickDeferred)
 
             rig.nowMs += DmAckCoalescer.HOLD_MS
             rig.dmAcks.flushDue()
@@ -5432,8 +5432,8 @@ class InboundPipelineTest {
 
             rig.deliver(alice, V2Author(alice, rig).dm("ble-1", "next door"), kind = TransportKind.Bluetooth)
 
-            assertEquals(1L, rig.metrics.snapshot().receiptsSealed)
-            assertEquals(0L, rig.metrics.snapshot().loraTickDeferred)
+            assertEquals(1L, rig.metrics.receipts().receiptsSealed)
+            assertEquals(0L, rig.metrics.lora().loraTickDeferred)
             assertTrue(rig.dmAcks.pending(alice.nodeId).isEmpty())
         }
 
@@ -5449,7 +5449,7 @@ class InboundPipelineTest {
 
             assertTrue(rig.originated.any { it.type == FrameType.RECEIPT })
             assertTrue(rig.dmAcks.pending(alice.nodeId).isEmpty())
-            assertEquals(0L, rig.metrics.snapshot().loraTickDeferred)
+            assertEquals(0L, rig.metrics.lora().loraTickDeferred)
         }
 
     /**
@@ -5576,7 +5576,7 @@ class InboundPipelineTest {
             // Delivered once, re-acked per copy (the receipt custody is the recovery channel), both sealed.
             assertEquals("again", rig.msgMap["v2-re1"]?.body)
             assertFalse(rig.originated.any { it.type == FrameType.RECEIPT })
-            assertEquals(2L, rig.metrics.snapshot().receiptsSealed)
+            assertEquals(2L, rig.metrics.receipts().receiptsSealed)
         }
 
     @Test
@@ -6377,15 +6377,15 @@ class InboundPipelineTest {
             assertFalse(rig.originated.any { it.type == FrameType.CHAT && it.recipientId == alice.nodeId })
             assertTrue(rig.custodyReplays.isEmpty())
             assertFalse(rig.groupMap.containsKey(group.id))
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(0L, rig.metrics.groups().groupSeedsAdopted)
 
             rig.deliver(alice, author.groupFrame(group, "g-first", "stock group"))
 
             // The roster landed, the parked seed replayed and adopted, and the first message opened on its
             // own first pass — never a NO_KEY drop, so the key-request heuristic was never even needed.
             assertTrue(rig.groupMap.containsKey(group.id))
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsReplayed)
+            assertEquals(1L, rig.metrics.groups().groupSeedsReplayed)
             assertEquals(1, rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).size)
             assertEquals("stock group", rig.msgMap["g-first"]?.body)
             assertEquals(0L, rig.drops(DropReason.GROUP_RATCHET_NO_KEY))
@@ -6428,7 +6428,7 @@ class InboundPipelineTest {
 
             assertEquals(0L, rig.drops(DropReason.RATCHET_DUPLICATE))
             assertEquals(1, rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).size)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(1L, rig.metrics.groups().groupSeedsAdopted)
             assertEquals(listOf<Pair<String?, String?>>(group.id to alice.nodeId), rig.custodyReplays)
         }
 
@@ -6475,7 +6475,7 @@ class InboundPipelineTest {
                     rig,
                 ).dm("seed-back", "", ctl = MessageContent.CTL_GROUP_KEY, gk = GroupKeyPayload(group.id, keys = listOf(author.seed()))),
             )
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
             assertTrue(rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).isEmpty())
             assertEquals(setOf(alice.nodeId), rig.departed(group.id))
 
@@ -6484,7 +6484,7 @@ class InboundPipelineTest {
             assertEquals(setOf(rig.self.nodeId, alice.nodeId), rig.members(group.id))
             assertTrue(rig.departed(group.id).isEmpty())
             coVerify(exactly = 1) { rig.groups.recordRejoin(group.id, alice.nodeId, 20L, rekey = true) }
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsReplayed)
+            assertEquals(1L, rig.metrics.groups().groupSeedsReplayed)
             assertEquals(1, rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).size)
             assertEquals("back again", rig.msgMap["g-back"]?.body)
             assertEquals(0L, rig.drops(DropReason.GROUP_RATCHET_NO_KEY))
@@ -6520,23 +6520,23 @@ class InboundPipelineTest {
                     rig,
                 ).dm("seed-parked", "", ctl = MessageContent.CTL_GROUP_KEY, gk = GroupKeyPayload(group.id, keys = listOf(author.seed()))),
             )
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
 
             // Bob never saw alice's leave, so his roster still lists her — but only her own signature lifts
             // the tombstone, and none of his frames touches her seed.
             for (sentAt in 20L..22L) rig.deliver(bob, rig.groupUpdate(bob, group, sentAt = sentAt))
 
             assertEquals(setOf(alice.nodeId), rig.departed(group.id))
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsReplayed)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(0L, rig.metrics.groups().groupSeedsReplayed)
             assertTrue(rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).isEmpty())
 
             // Her own frame rejoins her, and that is what releases the seed: replayed, adopted, opened.
             rig.deliver(alice, author.groupFrame(group, "g-back", "back again", sentAt = 30L))
 
             assertTrue(rig.departed(group.id).isEmpty())
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsReplayed)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsReplayed)
             assertEquals(1, rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).size)
             assertEquals("back again", rig.msgMap["g-back"]?.body)
             assertEquals(0L, rig.drops(DropReason.GROUP_RATCHET_NO_KEY))
@@ -6567,8 +6567,8 @@ class InboundPipelineTest {
             rig.deliver(bob, rig.groupUpdate(bob, group, sentAt = 20L))
 
             assertEquals(1, rig.pendingGroupKeys.sweepExpired())
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsReplayed)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(0L, rig.metrics.groups().groupSeedsReplayed)
         }
 
     @Test
@@ -6628,8 +6628,8 @@ class InboundPipelineTest {
                 ).dm("seed-known", "", ctl = MessageContent.CTL_GROUP_KEY, gk = GroupKeyPayload(group.id, keys = listOf(author.seed()))),
             )
 
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(0L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsAdopted)
             assertTrue(rig.pendingGroupKeys.release(group.id).isEmpty())
         }
 
@@ -6672,8 +6672,8 @@ class InboundPipelineTest {
             assertNull(row.photoHash)
             assertEquals(MessageEntity.KIND_GROUP_CREATED, rig.msgMap["created:${group.id}"]?.kind)
             // Adopted on this pass, nothing parked, the ack rode back, custody replayed as for any seed.
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(0L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsAdopted)
             assertEquals(1, rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).size)
             assertTrue(rig.originated.any { it.type == FrameType.CHAT && it.recipientId == alice.nodeId })
             assertEquals(listOf<Pair<String?, String?>>(group.id to alice.nodeId), rig.custodyReplays)
@@ -6708,8 +6708,8 @@ class InboundPipelineTest {
 
             assertNull(rig.groupMap["g-forged"])
             assertEquals(1L, rig.drops(DropReason.GROUP_ROSTER_REFUSED))
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(0L, rig.metrics.groups().groupSeedsAdopted)
             assertTrue(rig.seedCustodyReplays.isEmpty())
         }
 
@@ -6729,7 +6729,7 @@ class InboundPipelineTest {
 
             assertNull(rig.groupMap[theirs.id])
             assertEquals(0L, rig.drops(DropReason.GROUP_ROSTER_REFUSED))
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
         }
 
     @Test
@@ -6751,7 +6751,7 @@ class InboundPipelineTest {
             assertNull(rig.groupMap[ours.id])
             assertNull(rig.groupMap[other.id])
             assertEquals(0L, rig.drops(DropReason.GROUP_ROSTER_REFUSED))
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
         }
 
     @Test
@@ -6772,8 +6772,8 @@ class InboundPipelineTest {
             rig.deliver(bob, rig.rosterSeed(author, group, "seed-blocked"))
 
             assertNull(rig.groupMap[group.id])
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(0L, rig.metrics.groups().groupSeedsAdopted)
         }
 
     @Test
@@ -6794,8 +6794,8 @@ class InboundPipelineTest {
             assertEquals(setOf(rig.self.nodeId, alice.nodeId), rig.members(group.id))
             assertTrue(rig.departed(group.id).isEmpty())
             coVerify(exactly = 1) { rig.groups.recordRejoin(group.id, alice.nodeId, 20L, rekey = true) }
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(0L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsAdopted)
             assertEquals(1, rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).size)
             // Not a first sight: the row existed, so no seed-custody replay was asked for.
             assertTrue(rig.seedCustodyReplays.isEmpty())
@@ -6822,8 +6822,8 @@ class InboundPipelineTest {
             assertEquals(setOf(rig.self.nodeId), rig.members(group.id))
             assertEquals(setOf(alice.nodeId), rig.departed(group.id))
             coVerify(exactly = 0) { rig.groups.recordRejoin(any(), any(), any(), any()) }
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(1L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(0L, rig.metrics.groups().groupSeedsAdopted)
             assertTrue(rig.groupRatchetStore.recvChains(group.id, alice.nodeId, 1).isEmpty())
         }
 
@@ -6841,8 +6841,8 @@ class InboundPipelineTest {
             rig.deliver(alice, rig.rosterSeed(author, group.copy(name = "Renamed"), "seed-held", sentAt = 99L))
 
             assertEquals("", rig.groupMap[group.id]?.name)
-            assertEquals(0L, rig.metrics.snapshot().groupSeedsHeld)
-            assertEquals(1L, rig.metrics.snapshot().groupSeedsAdopted)
+            assertEquals(0L, rig.metrics.groups().groupSeedsHeld)
+            assertEquals(1L, rig.metrics.groups().groupSeedsAdopted)
             assertTrue(rig.seedCustodyReplays.isEmpty())
             coVerify(exactly = 0) { rig.groups.upsert(any()) }
         }

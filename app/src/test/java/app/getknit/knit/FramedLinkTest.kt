@@ -495,7 +495,7 @@ class FramedLinkTest {
         val next = LinkFraming.read(h.fromLink)!!
         assertEquals("the live frame comes next, not two stale digests", LinkFraming.Type.FRAME, next.type)
         assertArrayEquals(live, next.payload)
-        assertEquals(2L, metrics.snapshot().digestsReplaced)
+        assertEquals(2L, metrics.frames().digestsReplaced)
     }
 
     @Test
@@ -508,7 +508,7 @@ class FramedLinkTest {
         assertEquals(listOf("a"), LinkFraming.decodeDigest(LinkFraming.read(h.fromLink)!!.payload)!!.ids)
         h.link.sendDigest(listOf("b"))
         assertEquals(listOf("b"), LinkFraming.decodeDigest(LinkFraming.read(h.fromLink)!!.payload)!!.ids)
-        assertEquals(0L, metrics.snapshot().digestsReplaced)
+        assertEquals(0L, metrics.frames().digestsReplaced)
     }
 
     @Test
@@ -609,7 +609,7 @@ class FramedLinkTest {
         assertNotNull(got)
         assertEquals(400L, got!!.resumedFrom)
         assertArrayEquals("spliced byte for byte", body, File(got.path).readBytes())
-        assertEquals("one tail taken onto a kept prefix", 1L, metrics.fileResumes().takenIn)
+        assertEquals("one tail taken onto a kept prefix", 1L, metrics.files().filesResumedIn)
     }
 
     @Test
@@ -666,7 +666,7 @@ class FramedLinkTest {
         assertEquals("the size is the tail's", 2000L, header.size)
         assertEquals(1000L, header.offset)
         assertArrayEquals(body.copyOfRange(1000, 3000), readFileBody(h.fromLink))
-        assertTrue(awaitUntil { metrics.fileResumes().servedOut == 1L })
+        assertTrue(awaitUntil { metrics.files().filesResumedOut == 1L })
     }
 
     @Test

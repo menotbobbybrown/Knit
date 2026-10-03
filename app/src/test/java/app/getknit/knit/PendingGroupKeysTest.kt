@@ -32,7 +32,7 @@ class PendingGroupKeysTest {
         assertEquals("alice", released.single().fromNodeId)
         // The plane it was parked with rides along, exactly as PendingInbound keeps it.
         assertEquals(TransportKind.LoRa, released.single().kind)
-        assertEquals(1L, metrics.snapshot().groupSeedsHeld)
+        assertEquals(1L, metrics.groups().groupSeedsHeld)
         // Once released it's gone — a second release yields nothing.
         assertTrue(buffer.release("g-1").isEmpty())
     }
@@ -62,7 +62,7 @@ class PendingGroupKeysTest {
         assertTrue(buffer.hold("g-1", frame("s1", "alice")))
 
         assertEquals(1, buffer.release("g-1").size)
-        assertEquals(1L, metrics.snapshot().groupSeedsHeld)
+        assertEquals(1L, metrics.groups().groupSeedsHeld)
     }
 
     @Test

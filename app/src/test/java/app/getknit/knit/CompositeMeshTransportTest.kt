@@ -508,7 +508,7 @@ class CompositeMeshTransportTest {
             advanceUntilIdle()
             assertEquals("the fast link never formed → BLE fallback", 1, bt.sentFiles.size)
             assertTrue(nan.sentFiles.isEmpty())
-            assertEquals(1L, metrics.snapshot().nanBulkGraceTimeouts)
+            assertEquals(1L, metrics.nan().nanBulkGraceTimeouts)
         }
 
     @Test

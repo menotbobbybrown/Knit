@@ -12,7 +12,8 @@ Status: Accepted (2026-10-03). Work item knit/knit-next#116. Amends ADR 2026-09.
 and the holder streams only the rest; the fresh-ask rule and the two link reads are unchanged) and ADR
 2026-10.y9qh (a resumed stream's `ArrivingFile` starts at its offset; `size` keeps its meaning). Two additive
 fields, no capability bit, no version bump, no DB change; two vectors added, none moved. The iOS companion change
-is owed; until it lands, the iOS port takes and serves whole files as before. Device trial owed.
+is owed (knit-ios #2); until it lands, the iOS port takes and serves whole files as before. Device-verified on
+2026-10-03 (Pixel 9 → Pixel 7, the last paragraph).
 
 **What was observed.** A link that dropped mid-attachment threw the receiver's bytes away: `FramedLink.close()`
 deleted the temp file. The want survived (ADR 2026-09.ptv8 re-asks at every link-up and on the 60 s tick) and any
@@ -71,10 +72,10 @@ forever while both phones paid for the airtime. No lab scenario covered a cut tr
    at once. A memo that let a lower offset through would hand an unsigned asker a way around the flood bound.
 6. **Logs and counters.** ` from <offset>` rides last on the holder's `file …` line and the receiver's `rx …` lines,
    so 4tx5's `file ATTACHMENT/<hash>` serve count and every parse before it hold; the store logs each prefix kept,
-   dropped, evicted or refused as stale. Three counters — tails served, tails taken, splices refused — are read
-   through `MeshMetrics.fileResumes()` (the bridge's STATE: `filesResumedOut`, `filesResumedIn`, `splicesRefused`),
-   not `Snapshot`: its synthetic default constructor is at the JVM's 255-slot method limit (a `Long` takes two), and
-   one field more is a `ClassFormatError` at class load.
+   dropped, evicted or refused as stale. Three counters — tails served, tails taken, splices refused — live in
+   `MeshMetrics.Snapshot.files` (the bridge's STATE: `filesResumedOut`, `filesResumedIn`, `splicesRefused`). The
+   flat `Snapshot` had reached the JVM's 255-slot method limit (a `Long` takes two slots, and one field more is a
+   `ClassFormatError` at class load), so it was split into groups to take them.
 
 The alternatives. The issue's option 2 — keep the bytes for the same holder over the same link generation — puts
 nothing on the wire beyond the offset but covers only a link that comes straight back to the same phone, the
@@ -106,6 +107,21 @@ offset sends), `LinkFramingTest` (the offset round trip, the byte-identical whol
 the `blobReqContentResumed` and `fileHeaderResumed` vectors, and `AttachmentResumeLabTest`: a 1 MB picture cut at
 400 000 and 800 000 bytes by two holders with exact serve lists, an offset-ignoring holder, and a bad prefix that
 fails the real `MeshBlobStore` check. The lab drives the receiver's real `FileIntake`
-(`LabTransport.streamFiles`, cut by `lab.unlink`), so it runs the production splice. Device check: NAN dark on
-both phones, `…debug.PHY --es mode coded`, a 500 KB photo cut mid-transfer with `BLECAP 0`; the receiver logs
-`rx ATTACHMENT/<hash> <n>B ← <node> from <offset>` and the holder `file ATTACHMENT/<hash> … → <node> from <offset>`.
+(`LabTransport.streamFiles`, cut by `lab.unlink`), so it runs the production splice.
+
+**The device trial (2026-10-03).** Debug builds of this branch on the Pixel 9 (holder) and the Pixel 7 (receiver),
+NAN off on both. A 701,716 B photo was cut from the holder's side after 32,768 B had arrived. The Pixel 9 relinked
+and served only the rest (`file ATTACHMENT/82c382d1… 668948B in 23335ms @28672 → 24sd5jd4… from 32768`), and the
+Pixel 7 took it (`rx ATTACHMENT/82c382d1… 668948B ← ijeeg44p… from 32768`, its end line 60 s later). The prefix was
+dropped once the blob was stored, and STATE read `filesResumedOut` 1 on the holder and `filesResumedIn` 1,
+`splicesRefused` 0 on the receiver. An earlier cut (34,816 B kept) was answered first by the lab's iPhone
+(`dlrr2hzn…`, knit-ios `feat/blobs`). It ignored the offset and sent the whole file, which landed whole and took the
+prefix with it: the mixed-version fallback, on hardware.
+
+Two traps for a re-run:
+
+- Every neighbour the receiver asks also fetches the blob, because an ask for a blob not held is a want, so a carrier
+  can answer the re-ask first. Empty the holder with `BLECAP 0`, then cap it at one link (`BLECAP 1`): its next dial
+  picks the strongest peer. Keep it off after the cut until its 45 s serve memo lapses.
+- A cut before the first whole 16 KiB `FILE_CHUNK` record keeps nothing. A holder feeding three links at once had
+  delivered less than one record after 8.6 s.

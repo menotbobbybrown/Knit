@@ -168,16 +168,16 @@ class LoraMeshTransportTest {
             a.transport.start()
             b.transport.start()
             runCurrent()
-            val transcodedBefore = a.metrics.snapshot().loraTranscoded // the profile beacon already rode 0x05
+            val transcodedBefore = a.metrics.lora().loraTranscoded // the profile beacon already rode 0x05
             a.transport.fastFanout(frame(FrameType.CHAT, "alice", body = "north gate, ten minutes"))
             runCurrent()
             assertEquals("one 0x05 packet on the air", FastFrameCodec.TAG_TRANSCODED, a.link.sent.last()[0])
-            assertEquals(transcodedBefore + 1, a.metrics.snapshot().loraTranscoded)
-            assertEquals(0L, a.metrics.snapshot().transcodeFallbacks)
+            assertEquals(transcodedBefore + 1, a.metrics.lora().loraTranscoded)
+            assertEquals(0L, a.metrics.fast().transcodeFallbacks)
             assertTrue("bob decodes it through the same inbound path", b.received.any { it.envelope.senderId == "alice" })
             assertTrue(
                 b.metrics
-                    .snapshot()
+                    .fast()
                     .fastDropsByReason
                     .isEmpty(),
             )
@@ -198,16 +198,16 @@ class LoraMeshTransportTest {
             a.transport.start()
             b.transport.start()
             runCurrent()
-            val paddedBefore = a.metrics.snapshot().loraPadded
+            val paddedBefore = a.metrics.lora().loraPadded
             a.transport.fastFanout(frame(FrameType.CHAT, "alice", body = "north gate, ten minutes. bring the long cable."))
             runCurrent()
             val sent = a.link.sent.last()
             assertEquals("one packet, one byte past the cliff", MeshtasticProto.MAX_SIGNED_PAYLOAD + 1, sent.size)
-            assertEquals(paddedBefore + 1, a.metrics.snapshot().loraPadded)
+            assertEquals(paddedBefore + 1, a.metrics.lora().loraPadded)
             assertTrue("and bob still decodes it through the same inbound path", b.received.any { it.envelope.senderId == "alice" })
             assertTrue(
                 b.metrics
-                    .snapshot()
+                    .fast()
                     .fastDropsByReason
                     .isEmpty(),
             )
@@ -233,7 +233,7 @@ class LoraMeshTransportTest {
                     .last()
                     .size <= MeshtasticProto.MAX_SIGNED_PAYLOAD,
             )
-            assertEquals(0L, a.metrics.snapshot().loraPadded)
+            assertEquals(0L, a.metrics.lora().loraPadded)
             a.transport.stop()
             b.transport.stop()
         }
@@ -255,12 +255,12 @@ class LoraMeshTransportTest {
             val enc =
                 byteArrayOf(0xA4.toByte()) + tstr("nonce") + byteArrayOf(0x40) + tstr("v") + byteArrayOf(0x03) +
                     tstr("ct") + byteArrayOf(0x44, 1, 2, 3, 4) + tstr("keys") + byteArrayOf(0x80.toByte())
-            val transcodedBefore = a.metrics.snapshot().loraTranscoded
+            val transcodedBefore = a.metrics.lora().loraTranscoded
             a.transport.fastFanout(rawChat(byteArrayOf(0xA1.toByte()) + tstr("enc") + enc))
             runCurrent()
             assertEquals("0x03 carries it", FastFrameCodec.TAG_COMPACT, a.link.sent.last()[0])
-            assertEquals(1L, a.metrics.snapshot().transcodeFallbacks)
-            assertEquals("…and it is not counted as transcoded", transcodedBefore, a.metrics.snapshot().loraTranscoded)
+            assertEquals(1L, a.metrics.fast().transcodeFallbacks)
+            assertEquals("…and it is not counted as transcoded", transcodedBefore, a.metrics.lora().loraTranscoded)
             assertTrue(b.received.any { it.envelope.senderId == "alice" })
             a.transport.stop()
             b.transport.stop()
@@ -481,7 +481,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(1)
             runCurrent()
             assertEquals(TransportHealth.Healthy, a.transport.health.value)
-            assertEquals(1L, a.metrics.snapshot().loraSessionUps)
+            assertEquals(1L, a.metrics.lora().loraSessionUps)
             assertTrue("a self-profile beacon went out on session up", a.link.sent.isNotEmpty())
             a.transport.stop()
         }
@@ -507,7 +507,7 @@ class LoraMeshTransportTest {
                 b.transport.reachable.value
                     .any { it.nodeId == "alice" },
             )
-            assertTrue("bob received at least the chat", b.metrics.snapshot().loraReceived >= 1)
+            assertTrue("bob received at least the chat", b.metrics.lora().loraReceived >= 1)
             a.transport.stop()
             b.transport.stop()
         }
@@ -577,7 +577,7 @@ class LoraMeshTransportTest {
             assertEquals("anyone around?", post.body)
             assertEquals("the NodeDB puts a name on the speaker", "Bob", post.name)
             assertEquals("LongFast", post.channel)
-            assertEquals(1L, r.metrics.snapshot().meshPostIngested)
+            assertEquals(1L, r.metrics.meshtastic().meshPostIngested)
             r.transport.stop()
         }
 
@@ -596,7 +596,7 @@ class LoraMeshTransportTest {
 
             assertEquals(5, posts.size)
             assertEquals("not one packet went out", before, r.link.sent.size)
-            assertEquals(0L, r.metrics.snapshot().loraSent)
+            assertEquals(0L, r.metrics.lora().loraSent)
             r.transport.stop()
         }
 
@@ -637,7 +637,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertEquals("Crew", posts.single().channel)
-            assertEquals(1L, r.metrics.snapshot().meshPostIngested)
+            assertEquals(1L, r.metrics.meshtastic().meshPostIngested)
             r.transport.stop()
         }
 
@@ -665,7 +665,7 @@ class LoraMeshTransportTest {
                     .single { it.decodeToString() == "hello mesh" }
                     .decodeToString(),
             )
-            assertEquals(1L, r.metrics.snapshot().publicPostSent)
+            assertEquals(1L, r.metrics.meshtastic().publicPostSent)
             r.transport.stop()
         }
 
@@ -748,8 +748,8 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertEquals("the passive board still reads its own channel", 1, posts.size)
-            assertEquals(1L, r.metrics.snapshot().meshPostHeard)
-            assertEquals(1L, r.metrics.snapshot().meshPostIngested)
+            assertEquals(1L, r.metrics.meshtastic().meshPostHeard)
+            assertEquals(1L, r.metrics.meshtastic().meshPostIngested)
             r.transport.stop()
         }
 
@@ -771,17 +771,17 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue("nothing was mistaken for a public post", posts.isEmpty())
-            assertEquals(0L, a.metrics.snapshot().meshPostHeard)
+            assertEquals(0L, a.metrics.meshtastic().meshPostHeard)
             assertTrue("and the Knit frame still arrived", a.received.any { it.envelope.senderId == "bob" })
 
             // A chat packet on that slot is heard, judged, and refused off the table: Knit sits at index 0.
             a.link.deliverPublicText(from = 0xdeadbeefu, body = "hi", id = 5u)
             runCurrent()
             assertTrue(posts.isEmpty())
-            assertEquals(1L, a.metrics.snapshot().meshPostHeard)
+            assertEquals(1L, a.metrics.meshtastic().meshPostHeard)
             assertEquals(
                 1L,
-                a.metrics.snapshot().meshPostRefusedByReason[PublicChannelPolicy.Refusal.KNIT_ON_PRIMARY.name],
+                a.metrics.meshtastic().meshPostRefusedByReason[PublicChannelPolicy.Refusal.KNIT_ON_PRIMARY.name],
             )
             a.transport.stop()
             b.transport.stop()
@@ -803,9 +803,9 @@ class LoraMeshTransportTest {
 
             assertTrue("nothing reached the room", posts.isEmpty())
             val snap = r.metrics.snapshot()
-            assertEquals("the packet was never judged", 0L, snap.meshPostHeard)
-            assertEquals(0L, snap.meshPostIngested)
-            assertEquals(1L, snap.meshPostRefusedByReason[MESH_POST_ROOM_OFF])
+            assertEquals("the packet was never judged", 0L, snap.meshtastic.meshPostHeard)
+            assertEquals(0L, snap.meshtastic.meshPostIngested)
+            assertEquals(1L, snap.meshtastic.meshPostRefusedByReason[MESH_POST_ROOM_OFF])
             r.transport.stop()
         }
 
@@ -838,7 +838,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue("nothing went on the air", r.link.sent.isEmpty())
-            assertEquals(0L, r.metrics.snapshot().publicPostSent)
+            assertEquals(0L, r.metrics.meshtastic().publicPostSent)
             r.transport.stop()
         }
 
@@ -861,8 +861,8 @@ class LoraMeshTransportTest {
             runCurrent()
             assertTrue("nothing reached the room", posts.isEmpty())
             val snap = r.metrics.snapshot()
-            assertEquals("the packet was never judged", 0L, snap.meshPostHeard)
-            assertEquals(1L, snap.meshPostRefusedByReason[MESH_POST_DEDICATED])
+            assertEquals("the packet was never judged", 0L, snap.meshtastic.meshPostHeard)
+            assertEquals(1L, snap.meshtastic.meshPostRefusedByReason[MESH_POST_DEDICATED])
 
             assertEquals(PublicPostRefusal.DEDICATED, r.transport.postToPublicChannel("meet at the trailhead"))
             runCurrent()
@@ -904,7 +904,7 @@ class LoraMeshTransportTest {
             assertEquals(PublicChannelPolicy.PRIMARY_INDEX, r.link.sentChannels.single())
             assertEquals(MeshtasticProto.PORT_TEXT_MESSAGE, r.link.sentPortnums.single())
             assertEquals(LoraMeshTransport.HOP_LIMIT, r.link.sentHopLimits.single())
-            assertEquals(1L, r.metrics.snapshot().publicPostSent)
+            assertEquals(1L, r.metrics.meshtastic().publicPostSent)
             r.transport.stop()
         }
 
@@ -995,7 +995,7 @@ class LoraMeshTransportTest {
                     .single()
                     .decodeToString(),
             )
-            assertEquals(1L, r.metrics.snapshot().publicPostSent)
+            assertEquals(1L, r.metrics.meshtastic().publicPostSent)
             r.transport.stop()
         }
 
@@ -1016,7 +1016,7 @@ class LoraMeshTransportTest {
             assertEquals(listOf("first"), r.link.sent.map { it.decodeToString() })
             assertEquals(
                 1L,
-                r.metrics.snapshot().publicPostRefusedByReason[PublicPostRefusal.TOO_SOON.name],
+                r.metrics.meshtastic().publicPostRefusedByReason[PublicPostRefusal.TOO_SOON.name],
             )
             r.transport.stop()
         }
@@ -1060,7 +1060,7 @@ class LoraMeshTransportTest {
             assertTrue(r.link.sentPortnums.none { it == MeshtasticProto.PORT_TEXT_MESSAGE })
             assertEquals(
                 1L,
-                r.metrics.snapshot().publicPostRefusedByReason[PublicPostRefusal.KNIT_ON_PRIMARY.name],
+                r.metrics.meshtastic().publicPostRefusedByReason[PublicPostRefusal.KNIT_ON_PRIMARY.name],
             )
             r.transport.stop()
         }
@@ -1088,9 +1088,9 @@ class LoraMeshTransportTest {
             assertEquals(MeshtasticProto.PORT_TEXT_MESSAGE, r.link.sentPortnums[i])
             assertEquals(LoraMeshTransport.HOP_LIMIT, r.link.sentHopLimits[i])
             val snap = r.metrics.snapshot()
-            assertEquals(1L, snap.autoReplyHeard)
-            assertEquals(1L, snap.autoReplySent)
-            assertEquals("a reply is not a post either", 0L, snap.publicPostSent)
+            assertEquals(1L, snap.meshtastic.autoReplyHeard)
+            assertEquals(1L, snap.meshtastic.autoReplySent)
+            assertEquals("a reply is not a post either", 0L, snap.meshtastic.publicPostSent)
 
             // The same sender again, and the board's replay of the first message: silence.
             advanceTimeBy(DmAutoReplyPolicy.FLOOR_MS)
@@ -1101,7 +1101,7 @@ class LoraMeshTransportTest {
             assertEquals(1, r.link.sent.count { it.decodeToString() == DmAutoReplyPolicy.TEXT })
             assertEquals(
                 2L,
-                r.metrics.snapshot().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.REPLIED_RECENTLY.name],
+                r.metrics.meshtastic().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.REPLIED_RECENTLY.name],
             )
             r.transport.stop()
         }
@@ -1120,7 +1120,7 @@ class LoraMeshTransportTest {
             assertTrue(r.link.sentPortnums.none { it == MeshtasticProto.PORT_TEXT_MESSAGE })
             assertEquals(
                 1L,
-                r.metrics.snapshot().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.NOT_FOR_US.name],
+                r.metrics.meshtastic().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.NOT_FOR_US.name],
             )
             r.transport.stop()
         }
@@ -1142,7 +1142,7 @@ class LoraMeshTransportTest {
                 listOf(0x11u),
                 r.link.sentTos.filterIndexed { i, _ -> r.link.sentPortnums[i] == MeshtasticProto.PORT_TEXT_MESSAGE },
             )
-            assertEquals(2L, r.metrics.snapshot().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.TOO_SOON.name])
+            assertEquals(2L, r.metrics.meshtastic().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.TOO_SOON.name])
 
             advanceTimeBy(DmAutoReplyPolicy.FLOOR_MS)
             r.link.deliverPublicText(from = 0x22u, body = "hi again", id = 4u, to = 1u)
@@ -1170,7 +1170,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue(r.link.sentPortnums.none { it == MeshtasticProto.PORT_TEXT_MESSAGE })
-            assertEquals(1L, r.metrics.snapshot().autoReplyRefusedByReason[AutoReplyRefusal.DEDICATED.name])
+            assertEquals(1L, r.metrics.meshtastic().autoReplyRefusedByReason[AutoReplyRefusal.DEDICATED.name])
             r.transport.stop()
         }
 
@@ -1191,7 +1191,7 @@ class LoraMeshTransportTest {
 
             assertEquals("the room still works", "hi all", posts.single().body)
             assertTrue(r.link.sentPortnums.none { it == MeshtasticProto.PORT_TEXT_MESSAGE })
-            assertEquals(1L, r.metrics.snapshot().autoReplyRefusedByReason[AutoReplyRefusal.NOT_SET_UP.name])
+            assertEquals(1L, r.metrics.meshtastic().autoReplyRefusedByReason[AutoReplyRefusal.NOT_SET_UP.name])
             r.transport.stop()
         }
 
@@ -1227,7 +1227,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue(r.link.sentPortnums.none { it == MeshtasticProto.PORT_TEXT_MESSAGE })
-            assertEquals(1L, r.metrics.snapshot().autoReplyRefusedByReason[AutoReplyRefusal.NO_AIR.name])
+            assertEquals(1L, r.metrics.meshtastic().autoReplyRefusedByReason[AutoReplyRefusal.NO_AIR.name])
             r.transport.stop()
         }
 
@@ -1241,7 +1241,7 @@ class LoraMeshTransportTest {
             val first = bridgeRig(air, mutableListOf(), state = state)
             first.link.deliverPublicText(from = 0xdeadbeefu, body = "hi", id = 11u, to = 1u)
             runCurrent()
-            assertEquals(1L, first.metrics.snapshot().autoReplySent)
+            assertEquals(1L, first.metrics.meshtastic().autoReplySent)
             first.transport.stop()
             runCurrent()
             assertEquals(listOf(DmAutoReplyPolicy.senderKey(0xdeadbeefu)), state.snapshot?.autoReplied?.map { it.id })
@@ -1251,10 +1251,10 @@ class LoraMeshTransportTest {
             second.link.deliverPublicText(from = 0xdeadbeefu, body = "hi", id = 11u, to = 1u)
             runCurrent()
 
-            assertEquals(0L, second.metrics.snapshot().autoReplySent)
+            assertEquals(0L, second.metrics.meshtastic().autoReplySent)
             assertEquals(
                 1L,
-                second.metrics.snapshot().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.REPLIED_RECENTLY.name],
+                second.metrics.meshtastic().autoReplyRefusedByReason[DmAutoReplyPolicy.Refusal.REPLIED_RECENTLY.name],
             )
             second.transport.stop()
         }
@@ -1274,7 +1274,7 @@ class LoraMeshTransportTest {
             assertTrue(posts.isEmpty())
             assertEquals(
                 1L,
-                r.metrics.snapshot().meshPostRefusedByReason[PublicChannelPolicy.Refusal.OWN_BOARD.name],
+                r.metrics.meshtastic().meshPostRefusedByReason[PublicChannelPolicy.Refusal.OWN_BOARD.name],
             )
             r.transport.stop()
         }
@@ -1295,7 +1295,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue("nothing reached the air", b.received.none { it.envelope.senderId == "alice" })
-            assertEquals(0, a.metrics.snapshot().loraSent)
+            assertEquals(0, a.metrics.lora().loraSent)
             a.transport.stop()
             b.transport.stop()
         }
@@ -1335,7 +1335,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertEquals("nothing leaves a board that is not there", airedBeforeOutage, a.link.sent.size)
-            assertEquals("and no frame is charged to the channel guard", 0L, a.metrics.snapshot().loraSuppressed)
+            assertEquals("and no frame is charged to the channel guard", 0L, a.metrics.lora().loraSuppressed)
 
             a.link.ready()
             runCurrent()
@@ -1436,9 +1436,9 @@ class LoraMeshTransportTest {
 
             assertEquals("the link carried it; the board must not repeat it", sentBefore, a.link.sent.size)
             val snap = a.metrics.snapshot()
-            assertEquals(1L, snap.loraStaleAtSend)
-            assertEquals(mapOf(StaleAtSend.LINKED.name to 1L), snap.loraStaleAtSendByReason)
-            assertEquals("nothing was shed that the plane wanted", 0L, snap.loraDroppedQueue)
+            assertEquals(1L, snap.lora.loraStaleAtSend)
+            assertEquals(mapOf(StaleAtSend.LINKED.name to 1L), snap.lora.loraStaleAtSendByReason)
+            assertEquals("nothing was shed that the plane wanted", 0L, snap.lora.loraDroppedQueue)
             a.transport.stop()
         }
 
@@ -1470,7 +1470,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue("a merely-sighted peer's DM still rides", a.link.sent.size > sentBefore)
-            assertEquals(0L, a.metrics.snapshot().loraStaleAtSend)
+            assertEquals(0L, a.metrics.lora().loraStaleAtSend)
             a.transport.stop()
         }
 
@@ -1507,7 +1507,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertEquals("a frame this old is custody's business, not a live plane's", sentBefore, a.link.sent.size)
-            assertEquals(mapOf(StaleAtSend.STALE.name to 1L), a.metrics.snapshot().loraStaleAtSendByReason)
+            assertEquals(mapOf(StaleAtSend.STALE.name to 1L), a.metrics.lora().loraStaleAtSendByReason)
             a.transport.stop()
         }
 
@@ -1547,7 +1547,7 @@ class LoraMeshTransportTest {
             runCurrent()
 
             assertTrue("the fragments already on the air are finished, not stranded", a.link.sent.size > partSent)
-            assertEquals(0L, a.metrics.snapshot().loraStaleAtSend)
+            assertEquals(0L, a.metrics.lora().loraStaleAtSend)
             a.transport.stop()
         }
 
@@ -1563,7 +1563,7 @@ class LoraMeshTransportTest {
             a.transport.fastFanout(frame(FrameType.CHAT, "alice", body = incompressibleBody(400)))
             runCurrent()
             assertTrue("a 300-char post arrives reassembled", b.received.any { it.envelope.senderId == "alice" })
-            assertEquals(1L, b.metrics.snapshot().loraReassembled)
+            assertEquals(1L, b.metrics.lora().loraReassembled)
             a.transport.stop()
             b.transport.stop()
         }
@@ -1607,8 +1607,8 @@ class LoraMeshTransportTest {
             val delivered = b.received.firstOrNull { it.envelope.type == FrameType.CHAT && it.envelope.recipientId == "bob" }
             assertTrue("bob received alice's DM over LoRa", delivered != null)
             assertEquals("fromNodeId is the frame's senderId", "alice", delivered!!.fromNodeId)
-            assertEquals(1L, a.metrics.snapshot().loraDmSent)
-            assertEquals(1L, b.metrics.snapshot().loraDmReceived)
+            assertEquals(1L, a.metrics.lora().loraDmSent)
+            assertEquals(1L, b.metrics.lora().loraDmReceived)
 
             // The pipeline re-fans a relayed DM over the long-range plane; a copy heard over LoRa must not bounce.
             val bSentBefore = b.link.sent.size
@@ -1637,7 +1637,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertEquals("stale chat never rides a live plane", baseline, a.link.sent.size)
-            assertEquals(2L, a.metrics.snapshot().loraSuppressed)
+            assertEquals(2L, a.metrics.lora().loraSuppressed)
 
             // A peer's profile carries its publish stamp (hours old) and is the key bootstrap — never refused.
             a.transport.fastFanout(frame(FrameType.PROFILE, "carol", body = "x".repeat(20), sentAt = 0L))
@@ -1725,7 +1725,7 @@ class LoraMeshTransportTest {
 
             assertEquals("custody is asked once, for bob", listOf("bob"), asked)
             // The addressee is double-checked, and the frame fanned inside the dedup window is skipped.
-            assertEquals(1L, a.metrics.snapshot().loraReoffered)
+            assertEquals(1L, a.metrics.lora().loraReoffered)
             assertEquals("alice's first-hearing beacon + one re-offered frame", aSentBefore + 2, a.link.sent.size)
             assertTrue("bob received the re-offered DM", b.received.any { it.envelope.id == idOf(carried) })
             assertFalse(b.received.any { it.envelope.id == idOf(notForBob) })
@@ -1742,7 +1742,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertEquals(listOf("bob", "bob"), asked)
-            assertEquals(3L, a.metrics.snapshot().loraReoffered)
+            assertEquals(3L, a.metrics.lora().loraReoffered)
             a.transport.stop()
             b.transport.stop()
         }
@@ -1781,7 +1781,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertTrue("no re-offer either", asked.isEmpty())
-            assertEquals(0L, a.metrics.snapshot().loraDmSent)
+            assertEquals(0L, a.metrics.lora().loraDmSent)
             a.transport.stop()
             b.transport.stop()
         }
@@ -1805,7 +1805,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertTrue("custody is not even asked", asked.isEmpty())
-            assertEquals(0L, a.metrics.snapshot().loraReoffered)
+            assertEquals(0L, a.metrics.lora().loraReoffered)
             a.transport.stop()
             b.transport.stop()
         }
@@ -2137,7 +2137,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
 
-            assertEquals("the codec never ran", 0L, a.metrics.snapshot().loraTranscoded)
+            assertEquals("the codec never ran", 0L, a.metrics.lora().loraTranscoded)
             assertEquals("nothing was queued for a plane that cannot send", 0, pace.pending)
             assertTrue("and nothing reached a board", a.link.sent.isEmpty())
             a.transport.stop()
@@ -2169,8 +2169,8 @@ class LoraMeshTransportTest {
             runCurrent()
             a.link.emitNak(id = 5u, reason = RoutingError.DUTY_CYCLE_LIMIT)
             runCurrent()
-            assertEquals(1L, a.metrics.snapshot().loraNak)
-            assertEquals("attributable, not just counted", mapOf("DUTY_CYCLE_LIMIT" to 1L), a.metrics.snapshot().loraNakByReason)
+            assertEquals(1L, a.metrics.lora().loraNak)
+            assertEquals("attributable, not just counted", mapOf("DUTY_CYCLE_LIMIT" to 1L), a.metrics.lora().loraNakByReason)
             a.transport.stop()
         }
 
@@ -2400,7 +2400,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(3 * LoraGossipPolicy.MAX_INTERVAL_MS)
             runCurrent()
 
-            assertTrue("the offer reached the air", a.metrics.snapshot().loraOfferSent > 0)
+            assertTrue("the offer reached the air", a.metrics.lora().loraOfferSent > 0)
             assertTrue(
                 "and the backlog did not grow past one copy of one author's profile",
                 a.link.sent.count { it.size > 0 } < 12,
@@ -2430,8 +2430,8 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertEquals("the same publish is not put back on the air", before, a.link.sent.size)
-            assertEquals(1L, a.metrics.snapshot().loraProfileRefanSkipped)
-            assertEquals("and it is not counted as an ordinary dedup", 0L, a.metrics.snapshot().loraSuppressed)
+            assertEquals(1L, a.metrics.lora().loraProfileRefanSkipped)
+            assertEquals("and it is not counted as an ordinary dedup", 0L, a.metrics.lora().loraSuppressed)
 
             // A republish stamps a new frame id, so it is a different fact and rides.
             before = a.link.sent.size
@@ -2572,8 +2572,8 @@ class LoraMeshTransportTest {
             advanceTimeBy(10_000)
             runCurrent()
             assertEquals("nothing on the air for a linked or self recipient", afterBeacon, a.link.sent.size)
-            assertEquals(3L, a.metrics.snapshot().loraSkippedLinked)
-            assertEquals("the sig dedup slot was not burned", 0L, a.metrics.snapshot().loraSuppressed)
+            assertEquals(3L, a.metrics.lora().loraSkippedLinked)
+            assertEquals("the sig dedup slot was not burned", 0L, a.metrics.lora().loraSuppressed)
 
             // A sighting is not a link: the same DM to a merely-sighted bob rides.
             a.transport.suppressDataPath(emptySet())
@@ -2582,7 +2582,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(10_000)
             runCurrent()
             assertTrue("a DM to a sighted-but-unlinked peer rides", a.link.sent.size > afterBeacon)
-            assertEquals(1L, a.metrics.snapshot().loraDmSent)
+            assertEquals(1L, a.metrics.lora().loraDmSent)
 
             // The room is addressed to nobody and the gate never touches it.
             val beforeRoom = a.link.sent.size
@@ -2617,8 +2617,8 @@ class LoraMeshTransportTest {
             advanceTimeBy(10_000)
             runCurrent()
             assertEquals("nothing on the air for a spool-covered recipient", afterBeacon, a.link.sent.size)
-            assertEquals(2L, a.metrics.snapshot().loraSkippedInternet)
-            assertEquals("not counted as a link", 0L, a.metrics.snapshot().loraSkippedLinked)
+            assertEquals(2L, a.metrics.lora().loraSkippedInternet)
+            assertEquals("not counted as a link", 0L, a.metrics.lora().loraSkippedLinked)
             assertEquals(1, a.transport.status.value.internetCovered)
 
             // The cover lapses with the spool's evidence: the same DM rides again.
@@ -2646,7 +2646,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(10_000)
             runCurrent()
             assertTrue("a room post still rides", a.link.sent.size > afterBeacon)
-            assertEquals(0L, a.metrics.snapshot().loraSkippedInternet)
+            assertEquals(0L, a.metrics.lora().loraSkippedInternet)
             a.transport.stop()
         }
 
@@ -2670,7 +2670,7 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertEquals("the spool carries her tick", bSentBefore, b.link.sent.size)
-            assertEquals(1L, b.metrics.snapshot().loraSkippedInternet)
+            assertEquals(1L, b.metrics.lora().loraSkippedInternet)
 
             b.transport.coveredByInternet(emptySet())
             b.transport.fastSend(frame(FrameType.RECEIPT, "bob"), Peer("alice"))
@@ -2700,8 +2700,8 @@ class LoraMeshTransportTest {
             advanceTimeBy(4_000)
             runCurrent()
             assertTrue("custody is not even asked", asked.isEmpty())
-            assertEquals(0L, a.metrics.snapshot().loraReoffered)
-            assertEquals(1L, a.metrics.snapshot().loraSkippedInternet)
+            assertEquals(0L, a.metrics.lora().loraReoffered)
+            assertEquals(1L, a.metrics.lora().loraSkippedInternet)
             a.transport.stop()
             b.transport.stop()
         }
@@ -2732,8 +2732,8 @@ class LoraMeshTransportTest {
 
             assertEquals("the spool carried it; the board must not repeat it", sentBefore, a.link.sent.size)
             val snap = a.metrics.snapshot()
-            assertEquals(1L, snap.loraStaleAtSend)
-            assertEquals(mapOf(StaleAtSend.INTERNET.name to 1L), snap.loraStaleAtSendByReason)
+            assertEquals(1L, snap.lora.loraStaleAtSend)
+            assertEquals(mapOf(StaleAtSend.INTERNET.name to 1L), snap.lora.loraStaleAtSendByReason)
             a.transport.stop()
         }
 
@@ -2775,15 +2775,15 @@ class LoraMeshTransportTest {
 
             a.transport.longRangeFanout(frame(FrameType.CHAT, "alice", recipientId = "bob", body = "tick"), FanoutHint.TICK)
             a.transport.longRangeFanout(frame(FrameType.CHAT, "alice", recipientId = "bob", body = "dm"))
-            assertEquals("the DM evicted the tick", 1L, a.metrics.snapshot().loraDroppedQueue)
+            assertEquals("the DM evicted the tick", 1L, a.metrics.lora().loraDroppedQueue)
             assertEquals(1, pace.pending)
 
             a.transport.longRangeFanout(frame(FrameType.CHAT, "alice", recipientId = "bob", body = "tick 2"), FanoutHint.TICK)
-            assertEquals("a tick behind a DM yields", 2L, a.metrics.snapshot().loraDroppedQueue)
+            assertEquals("a tick behind a DM yields", 2L, a.metrics.lora().loraDroppedQueue)
 
             // The same bytes without the hint are content: within one class the oldest goes, so the newcomer stays.
             a.transport.longRangeFanout(frame(FrameType.CHAT, "carol", recipientId = "bob", body = "relayed dm-form"))
-            assertEquals(3L, a.metrics.snapshot().loraDroppedQueue)
+            assertEquals(3L, a.metrics.lora().loraDroppedQueue)
             assertEquals(1, pace.pending)
             a.transport.stop()
         }

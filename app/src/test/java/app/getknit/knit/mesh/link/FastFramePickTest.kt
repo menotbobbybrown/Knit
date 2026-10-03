@@ -62,9 +62,9 @@ class FastFramePickTest {
         FastFramePick.record(FastFramePick.Choice(transcoded, FastFramePick.Form.TRANSCODED), metrics)
         FastFramePick.record(FastFramePick.Choice(transcodedFrag, FastFramePick.Form.TRANSCODED), metrics)
         val snap = metrics.snapshot()
-        assertEquals(1L, snap.fastLegacySent)
-        assertEquals("a single compact message", 1L, snap.fastCompactSent)
-        assertEquals("both fragmented sends", 2L, snap.fastFragSent)
-        assertEquals("transcoded, fragmented or not", 2L, snap.fastTranscodedSent)
+        assertEquals(1L, snap.fast.fastLegacySent)
+        assertEquals("a single compact message", 1L, snap.fast.fastCompactSent)
+        assertEquals("both fragmented sends", 2L, snap.fast.fastFragSent)
+        assertEquals("transcoded, fragmented or not", 2L, snap.fast.fastTranscodedSent)
     }
 }

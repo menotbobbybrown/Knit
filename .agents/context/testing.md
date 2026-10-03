@@ -291,9 +291,13 @@ hop (fixed in `MeshRouter.countOverheard`, pinned by `MeshRouterTest`).
   tick the author at all: that is the residual ADR 2026-09.y5f3 names, not a scenario bug.
 - **The router's relay jitter is real time the lab cannot pin** (`MeshRouter.jitter` is not reachable
   through `MeshManager`): a first-seen frame's relay fires 0–150 ms later, later still under load, with
-  targets read *then*. A scenario that unlinks a node, sends, and re-links must wait for the carrier's relay
-  decisions (`framesRelayed` moved by the number sent) before the link comes back, or the router hands the
-  newcomer frames custody has already evicted (`CustodyQuotaLabTest` flaked exactly so, twice).
+  targets read *then*. In a scenario that unlinks a node, sends and re-links, a relay filed before the link
+  came back can count the newcomer among its targets and hand it a frame custody has already evicted
+  (`CustodyQuotaLabTest` flaked exactly so). A count of the carrier's relays since a baseline is no sync:
+  a relay of an earlier frame still in its jitter when the baseline was read lands inside the count. Wait on
+  the store instead (`CustodyQuotaLabTest.awaitCustody`: custody holding exactly the newest frames), and re-link
+  with the air losing the carrier's relays (`connect(…, lossy = { it.hops > 0 })`). What the newcomer must get
+  then crosses as a custody serve, re-wrapped at hop 0, on the next digest exchange.
 - **First contact by board alone is minutes, not seconds**: a passive gateway fans nothing, a superseded
   profile fan-out is dropped when the election flips, and the bridge budget (`BRIDGE_SHARE` of the 15-min
   window) serves about one profile per window per gateway. LoRa scenarios meet everyone by radio first

@@ -65,7 +65,7 @@ class GroupMembershipLabTest {
             val bob = lab.node("bob").apply { setDisplayName("Bob") }
             val carol = lab.node("carol").apply { setDisplayName("Carol") }
             val groupId = triangleWithAGroup(alice, bob, carol)
-            val seedsBefore = bob.metrics.snapshot().groupSeedsSent
+            val seedsBefore = bob.metrics.groups().groupSeedsSent
 
             alice.leaveGroup(groupId)
             assertTrue(
@@ -83,7 +83,7 @@ class GroupMembershipLabTest {
             assertTrue(bob.sendGroup(groupId, "after alice left"))
 
             lab.assertConverged(listOf(bob, carol), atLeast = 2, carriers = listOf(alice)) { groupId }
-            assertTrue("bob's send after the leave minted no fresh seed", bob.metrics.snapshot().groupSeedsSent > seedsBefore)
+            assertTrue("bob's send after the leave minted no fresh seed", bob.metrics.groups().groupSeedsSent > seedsBefore)
             assertEquals("alice's row is a tombstone", true, alice.group(groupId)?.left)
             assertEquals("alice reads nothing of the thread after leaving", emptySet<Pair<String, String>>(), alice.decrypted(groupId))
             assertEquals(setOf(alice.nodeId), carol.groupShape(groupId)?.departed)
@@ -176,7 +176,7 @@ class GroupMembershipLabTest {
                 "alice's seed never rejoined her on bob's phone",
                 lab.tryAwait(1) { if (bob.groupShape(groupId)?.departed == emptySet<String>()) 1 else 0 },
             )
-            assertEquals(0L, bob.metrics.snapshot().groupSeedsHeld)
+            assertEquals(0L, bob.metrics.groups().groupSeedsHeld)
 
             // The held group frame is gone with the release; a fresh link's digest exchange re-serves it from
             // Alice's custody, and it opens on its first pass under the chain the seed already adopted.

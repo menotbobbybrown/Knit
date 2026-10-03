@@ -3207,18 +3207,18 @@ class MeshManager(
                 val s = metrics.snapshot()
                 Log.d(
                     TAG,
-                    "metrics: originated=${s.framesOriginated} delivered=${s.framesDelivered} " +
-                        "relayed=${s.framesRelayed} handedOn=${s.framesHandedOn} suppressed=${s.framesSuppressed} " +
-                        "deduped=${s.framesDeduped} bytesSent=${s.bytesSent} " +
-                        "dropped=${s.framesDropped} drops=${s.dropsByReason} " +
-                        "keyReq=${s.keyRequestsSent} keyServed=${s.keysServed} keyRecovered=${s.keysRecovered} " +
-                        "framesHeld=${s.framesHeld} framesReplayed=${s.framesReplayed} " +
-                        "groupSeedsHeld=${s.groupSeedsHeld} groupSeedsReplayed=${s.groupSeedsReplayed} " +
-                        "receiptsResent=${s.receiptsResent} " +
-                        "receiptsSealed=${s.receiptsSealed}/${s.receiptsSealedFallback} " +
-                        "dmSealedV3=${s.dmSealedV3} ticksUnsigned=${s.ticksUnsigned} " +
-                        "reactionsSealed=${s.reactionsSealed}/${s.reactionsSealedFallback} " +
-                        "filesNan=${s.filesSentNan} filesBt=${s.filesSentBt} bulkTimeouts=${s.nanBulkGraceTimeouts}",
+                    "metrics: originated=${s.frames.framesOriginated} delivered=${s.frames.framesDelivered} " +
+                        "relayed=${s.frames.framesRelayed} handedOn=${s.frames.framesHandedOn} suppressed=${s.frames.framesSuppressed} " +
+                        "deduped=${s.frames.framesDeduped} bytesSent=${s.frames.bytesSent} " +
+                        "dropped=${s.frames.framesDropped} drops=${s.frames.dropsByReason} " +
+                        "keyReq=${s.keys.keyRequestsSent} keyServed=${s.keys.keysServed} keyRecovered=${s.keys.keysRecovered} " +
+                        "framesHeld=${s.keys.framesHeld} framesReplayed=${s.keys.framesReplayed} " +
+                        "groupSeedsHeld=${s.groups.groupSeedsHeld} groupSeedsReplayed=${s.groups.groupSeedsReplayed} " +
+                        "receiptsResent=${s.receipts.receiptsResent} " +
+                        "receiptsSealed=${s.receipts.receiptsSealed}/${s.receipts.receiptsSealedFallback} " +
+                        "dmSealedV3=${s.seals.dmSealedV3} ticksUnsigned=${s.receipts.ticksUnsigned} " +
+                        "reactionsSealed=${s.seals.reactionsSealed}/${s.seals.reactionsSealedFallback} " +
+                        "filesNan=${s.files.filesSentNan} filesBt=${s.files.filesSentBt} bulkTimeouts=${s.nan.nanBulkGraceTimeouts}",
                 )
                 // The contribution ledger banks its deltas on the same tick: one DataStore write a minute at most.
                 ledger.flush()

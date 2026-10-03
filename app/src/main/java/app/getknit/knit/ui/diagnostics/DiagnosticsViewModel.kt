@@ -76,7 +76,7 @@ data class DiagnosticsUiState(
     val knownNodes: List<NodeInfo> = emptyList(),
     /** How many [Reach.Known] nodes there are in total, so the screen can say how many it left out. */
     val knownTotal: Int = 0,
-    val metrics: MeshMetrics.Snapshot = MeshMetrics.Snapshot(0, 0, 0, 0, 0, 0),
+    val metrics: MeshMetrics.Snapshot = MeshMetrics.Snapshot(),
     // One row per radio plane: the live ones the composite built, plus the phone radios it could not.
     val transports: List<TransportRow> = emptyList(),
     /** Which phone radios this device has, so the "radios off" hint can name the one that matters. */

@@ -190,7 +190,7 @@ class AttachmentResumeLabTest {
             lab.link(alice, bob)
             lab.await(1) {
                 bob.metrics
-                    .fileResumes()
+                    .files()
                     .splicesRefused
                     .toInt()
             }

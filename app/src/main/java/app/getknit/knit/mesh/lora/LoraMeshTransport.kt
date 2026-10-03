@@ -241,6 +241,12 @@ internal class LoraMeshTransport(
     @Volatile
     private var role = LoraGatewayPolicy.Role.ACTIVE
 
+    /**
+     * [role], for the `mesh/lab` harness to wait on the election itself. Not [status]: two collectors republish
+     * that snapshot without a lock on every link change, so it can hold a role this field has already left.
+     */
+    internal val gatewayRole: LoraGatewayPolicy.Role get() = role
+
     // When this gateway last put a post on the foreign public channel, for the per-gateway floor. Monotonic
     // (`clock`), so it survives a wall-clock jump; NEVER so the first post of a session is never held.
     private val lastPublicPostAt = AtomicLong(NEVER)

@@ -112,21 +112,21 @@ class CustodyLabTest {
 
             // Bob delivers it, and his receipt purges his copy and Dave's. His relay of the DM fires here, while Dave
             // is his only link, so it cannot reach Carol ahead of the receipt.
-            val bobRelayed = bob.metrics.snapshot().framesRelayed
+            val bobRelayed = bob.metrics.frames().framesRelayed
             lab.link(dave, bob)
             lab.await(1) {
                 val delivered = bob.decrypted(bob.dmWith(alice)).isNotEmpty()
                 if (delivered && dm !in bob.custodyIds() && dm !in dave.custodyIds()) 1 else 0
             }
-            lab.await(1) { (bob.metrics.snapshot().framesRelayed - bobRelayed).toInt() }
+            lab.await(1) { (bob.metrics.frames().framesRelayed - bobRelayed).toInt() }
             lab.unlink(dave, bob)
 
             // Carol takes the receipt from Bob's custody, then meets Alice with it — once her own relay of it has fired,
             // so it cannot slip to Alice past the hold below.
-            val carolRelayed = carol.metrics.snapshot().framesRelayed
+            val carolRelayed = carol.metrics.frames().framesRelayed
             lab.link(bob, carol)
             lab.awaitCustodyParity(bob, carol)
-            lab.await(1) { (carol.metrics.snapshot().framesRelayed - carolRelayed).toInt() }
+            lab.await(1) { (carol.metrics.frames().framesRelayed - carolRelayed).toInt() }
             lab.unlink(bob, carol)
             // Carol's frames to Alice are held, digests excepted: Alice serves the DM on Carol's digest before she can
             // hear the receipt. The serve landing on Carol, and her router finishing it, is what says she handled it —

@@ -270,7 +270,7 @@ class SessionLabTest {
                 "bob never asked for the key",
                 lab.tryAwait(1) {
                     bob.metrics
-                        .snapshot()
+                        .groups()
                         .groupKeyRequestsSent
                         .toInt()
                 },
@@ -281,7 +281,7 @@ class SessionLabTest {
                     "  alice↔bob sessions: ${alice.session(bob)} / ${bob.session(alice)}\n${lab.report(listOf(alice, bob))}",
                 opened,
             )
-            assertEquals(1L, bob.metrics.snapshot().groupKeyRequestsSent)
+            assertEquals(1L, bob.metrics.groups().groupKeyRequestsSent)
             // A row is written before its tick is sealed, so three rows do not mean three ticks left: one still
             // being sealed when the link goes is lost for good (#96, its own repro below). Wait for the ticks.
             lab.await(1) { if (alice.missingAcks(groupId, listOf(alice, bob)).isEmpty()) 1 else 0 }

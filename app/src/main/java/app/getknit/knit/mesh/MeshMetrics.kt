@@ -6,7 +6,7 @@ import java.util.concurrent.atomic.AtomicLong
 /**
  * Why an inbound frame we wanted was dropped — distinct from policy drops (blocked sender / moderation),
  * which are NOT counted here so a staged rollout's drop dashboard stays a pure "couldn't use it" signal.
- * Surfaced in [MeshMetrics.Snapshot.dropsByReason] for the Diagnostics screen + the periodic metrics log.
+ * Surfaced in [MeshMetrics.Snapshot.Frames.dropsByReason] for the Diagnostics screen + the periodic metrics log.
  */
 enum class DropReason {
     /** Bytes that wouldn't decode into a frame (malformed, or an unknown wrapper/envelope shape). */
@@ -108,7 +108,7 @@ enum class DropReason {
 
 /**
  * Why a Bluetooth L2CAP connect attempt to a peer failed — surfaced per-reason in
- * [MeshMetrics.Snapshot.btConnectFailsByReason] and the failure log, so an intermittent "can link one peer
+ * [MeshMetrics.Snapshot.Bluetooth.btConnectFailsByReason] and the failure log, so an intermittent "can link one peer
  * but not the second" (the suspected BLE ↔ A2DP-audio radio contention) is *attributable* rather than a
  * silent retry. Best-effort buckets classified from the (otherwise-discarded) connect exception; the raw
  * throwable is always logged alongside.
@@ -132,7 +132,7 @@ enum class ConnectFailReason {
 
 /**
  * Why an inbound coordination-plane fast-path message (compact `0x03` / fragment `0x04`,
- * `mesh/link/FastFrameCodec`) was discarded. Surfaced in [MeshMetrics.Snapshot.fastDropsByReason]:
+ * `mesh/link/FastFrameCodec`) was discarded. Surfaced in [MeshMetrics.Snapshot.FastPath.fastDropsByReason]:
  * TIMEOUT/OVERFLOW climbing means fragments are being lost mid-frame (range edge, tx-queue pressure);
  * UNKNOWN_TAG means a newer peer is emitting a tag this build doesn't know; DECODE_FAILED with any
  * volume means a framing/dictionary mismatch (should be ~0 — the flood copy self-heals either way).
@@ -159,7 +159,7 @@ enum class FastPathDrop {
 
 /**
  * Why the BLE side channel (`mesh/bluetooth/BleSideChannel`, the extended-advertising page carrier) discarded
- * a frame. Surfaced in [MeshMetrics.Snapshot.bleSideDropsByReason]: STALE/OVERFLOW climbing means the pages
+ * a frame. Surfaced in [MeshMetrics.Snapshot.Bluetooth.bleSideDropsByReason]: STALE/OVERFLOW climbing means the pages
  * cannot keep up with what is offered (two slots at a ~12 s dwell is the whole capacity); FRAG_TIMEOUT means
  * a part of a multi-part frame was never heard (range edge, a scanner window that missed it); DECODE_FAILED
  * with volume means a framing mismatch, or two senders' fragments with one id were assembled together.
@@ -192,9 +192,9 @@ enum class BleSideDrop {
  * format is measurable in the field. Pure JVM (no Android dependencies) so it can live in [mesh] and
  * be asserted from the same unit tests as [MeshRouter].
  *
- * The ratio of [Snapshot.framesSuppressed] to [Snapshot.framesRelayed] shows how much redundant
- * rebroadcasting the overhear suppression eliminates; [Snapshot.bytesSent] tracks the CBOR win;
- * [Snapshot.dropsByReason] makes the otherwise-silent inbound drops visible during a rollout.
+ * The ratio of [Snapshot.Frames.framesSuppressed] to [Snapshot.Frames.framesRelayed] shows how much redundant
+ * rebroadcasting the overhear suppression eliminates; [Snapshot.Frames.bytesSent] tracks the CBOR win;
+ * [Snapshot.Frames.dropsByReason] makes the otherwise-silent inbound drops visible during a rollout.
  *
  * Both size suppressions below say the same thing: this is a flat registry whose length tracks the *number
  * of metrics*, not any complexity — one field and one tiny increment each. Splitting it would scatter the
@@ -819,7 +819,7 @@ class MeshMetrics {
     }
 
     /** An armed bulk-transfer NDP didn't come up within the composite's grace — the blob fell back to BLE.
-     *  Climbing far faster than [Snapshot.filesSentNan] means we're arming ghosts (see BulkWantTracker). */
+     *  Climbing far faster than [Snapshot.Files.filesSentNan] means we're arming ghosts (see BulkWantTracker). */
     fun onBulkGraceTimeout() {
         nanBulkGraceTimeouts.incrementAndGet()
     }
@@ -1126,11 +1126,27 @@ class MeshMetrics {
         autoReplyRefusedByReason.computeIfAbsent(reason) { AtomicLong() }.incrementAndGet()
     }
 
-    @Suppress("LongMethod") // a flat field-by-field copy — one line per counter; splitting it would only scatter it
-    fun snapshot(): Snapshot {
+    /** Every counter, read at once ([Snapshot]). One group's counters alone come from [frames], [lora] and the rest. */
+    fun snapshot(): Snapshot =
+        Snapshot(
+            frames = frames(),
+            keys = keys(),
+            seals = seals(),
+            receipts = receipts(),
+            groups = groups(),
+            files = files(),
+            bluetooth = bluetooth(),
+            nan = nan(),
+            fast = fast(),
+            spool = spool(),
+            lora = lora(),
+            meshtastic = meshtastic(),
+        )
+
+    /** The [Snapshot.Frames] counters alone, read now. */
+    fun frames(): Snapshot.Frames {
         val byReason = drops.mapValues { it.value.get() }
-        val connectByReason = connectFails.mapValues { it.value.get() }
-        return Snapshot(
+        return Snapshot.Frames(
             framesOriginated = framesOriginated.get(),
             framesDelivered = framesDelivered.get(),
             framesRelayed = framesRelayed.get(),
@@ -1140,28 +1156,49 @@ class MeshMetrics {
             bytesSent = bytesSent.get(),
             framesDropped = byReason.values.sum(),
             dropsByReason = byReason.filterValues { it > 0 },
+            digestsReplaced = digestsReplaced.get(),
+            healsCompleted = healsCompleted.get(),
+        )
+    }
+
+    /** The [Snapshot.Keys] counters alone, read now. */
+    fun keys(): Snapshot.Keys =
+        Snapshot.Keys(
             keyRequestsSent = keyRequestsSent.get(),
-            introsSent = introsSent.get(),
-            introsAnswered = introsAnswered.get(),
             keysServed = keysServed.get(),
             keysRecovered = keysRecovered.get(),
             framesHeld = framesHeld.get(),
             framesReplayed = framesReplayed.get(),
-            healsCompleted = healsCompleted.get(),
-            blobAsksHandled = blobAsksHandled.get(),
-            receiptsResent = receiptsResent.get(),
+            introsSent = introsSent.get(),
+            introsAnswered = introsAnswered.get(),
+        )
+
+    /** The [Snapshot.Seals] counters alone, read now. */
+    fun seals(): Snapshot.Seals =
+        Snapshot.Seals(
             dmSealedV2 = dmSealedV2.get(),
             dmSealedV3 = dmSealedV3.get(),
-            ticksUnsigned = ticksUnsigned.get(),
             dmSealedV1Fallback = dmSealedV1Fallback.get(),
+            reactionsSealed = reactionsSealed.get(),
+            reactionsSealedFallback = reactionsSealedFallback.get(),
+        )
+
+    /** The [Snapshot.Receipts] counters alone, read now. */
+    fun receipts(): Snapshot.Receipts =
+        Snapshot.Receipts(
+            receiptsResent = receiptsResent.get(),
             receiptsSealed = receiptsSealed.get(),
             receiptsSealedFallback = receiptsSealedFallback.get(),
             receiptsCustodied = receiptsCustodied.get(),
             receiptsCoalesced = receiptsCoalesced.get(),
             receiptsRidden = receiptsRidden.get(),
             receiptsSpooled = receiptsSpooled.get(),
-            reactionsSealed = reactionsSealed.get(),
-            reactionsSealedFallback = reactionsSealedFallback.get(),
+            ticksUnsigned = ticksUnsigned.get(),
+        )
+
+    /** The [Snapshot.Groups] counters alone, read now. */
+    fun groups(): Snapshot.Groups =
+        Snapshot.Groups(
             groupSealedRatchet = groupSealedRatchet.get(),
             groupSealedV1Fallback = groupSealedV1Fallback.get(),
             groupSeedsSent = groupSeedsSent.get(),
@@ -1171,9 +1208,46 @@ class MeshMetrics {
             groupKeyRequestsSent = groupKeyRequestsSent.get(),
             groupRootsMinted = groupRootsMinted.get(),
             groupRootsAdopted = groupRootsAdopted.get(),
+        )
+
+    /** The [Snapshot.Files] counters alone, read now. */
+    fun files(): Snapshot.Files =
+        Snapshot.Files(
+            filesSentNan = filesSentNan.get(),
+            filesSentBt = filesSentBt.get(),
+            blobAsksHandled = blobAsksHandled.get(),
+            filesResumedOut = filesResumedOut.get(),
+            filesResumedIn = filesResumedIn.get(),
+            splicesRefused = splicesRefused.get(),
+        )
+
+    /** The [Snapshot.Bluetooth] counters alone, read now. */
+    fun bluetooth(): Snapshot.Bluetooth {
+        val connectByReason = connectFails.mapValues { it.value.get() }
+        return Snapshot.Bluetooth(
             btConnectFails = connectByReason.values.sum(),
             btConnectFailsByReason = connectByReason.filterValues { it > 0 },
             btLinksEstablished = btLinksEstablished.get(),
+            bleLinkDupSkipped = bleLinkDupSkipped.get(),
+            bleCodedSightings = bleCodedSightings.get(),
+            bleCodedDials = bleCodedDials.get(),
+            blePhyStepsDown = blePhyStepsDown.get(),
+            blePhyStepsUp = blePhyStepsUp.get(),
+            blePhyGiveUps = blePhyGiveUps.get(),
+            bleCodedAdvertDark = bleCodedAdvertDark.get(),
+            bleSideOffered = bleSideOffered.get(),
+            bleSidePartsAired = bleSidePartsAired.get(),
+            bleSideTooBig = bleSideTooBig.get(),
+            bleSideHeard = bleSideHeard.get(),
+            bleSideReassembled = bleSideReassembled.get(),
+            bleSideDeduped = bleSideDeduped.get(),
+            bleSideDropsByReason = bleSideDrops.mapValues { it.value.get() }.filterValues { it > 0 },
+        )
+    }
+
+    /** The [Snapshot.Nan] counters alone, read now. */
+    fun nan(): Snapshot.Nan =
+        Snapshot.Nan(
             nanServesPeak = nanServesPeak.get(),
             nanOwedNoLinkPeakMs = nanOwedNoLinkPeakMs.get(),
             nanAcceptsRefused = nanAcceptsRefused.get(),
@@ -1183,9 +1257,12 @@ class MeshMetrics {
             nanMsgSendsFailed = nanMsgSendsFailed.get(),
             nanMsgPlaneStalledPeakMs = nanMsgPlaneStalledPeakMs.get(),
             nanMsgPlaneCycles = nanMsgPlaneCycles.get(),
-            filesSentNan = filesSentNan.get(),
-            filesSentBt = filesSentBt.get(),
             nanBulkGraceTimeouts = nanBulkGraceTimeouts.get(),
+        )
+
+    /** The [Snapshot.FastPath] counters alone, read now. */
+    fun fast(): Snapshot.FastPath =
+        Snapshot.FastPath(
             fastCompactSent = fastCompactSent.get(),
             fastLegacySent = fastLegacySent.get(),
             fastFragSent = fastFragSent.get(),
@@ -1194,21 +1271,11 @@ class MeshMetrics {
             fastTranscodedSent = fastTranscodedSent.get(),
             transcodeFallbacks = transcodeFallbacks.get(),
             fastDropsByReason = fastDrops.mapValues { it.value.get() }.filterValues { it > 0 },
-            bleSideOffered = bleSideOffered.get(),
-            bleSidePartsAired = bleSidePartsAired.get(),
-            bleSideTooBig = bleSideTooBig.get(),
-            bleSideHeard = bleSideHeard.get(),
-            bleSideReassembled = bleSideReassembled.get(),
-            bleSideDeduped = bleSideDeduped.get(),
-            bleSideDropsByReason = bleSideDrops.mapValues { it.value.get() }.filterValues { it > 0 },
-            bleLinkDupSkipped = bleLinkDupSkipped.get(),
-            bleCodedSightings = bleCodedSightings.get(),
-            bleCodedDials = bleCodedDials.get(),
-            blePhyStepsDown = blePhyStepsDown.get(),
-            blePhyStepsUp = blePhyStepsUp.get(),
-            blePhyGiveUps = blePhyGiveUps.get(),
-            bleCodedAdvertDark = bleCodedAdvertDark.get(),
-            digestsReplaced = digestsReplaced.get(),
+        )
+
+    /** The [Snapshot.Spool] counters alone, read now. */
+    fun spool(): Snapshot.Spool =
+        Snapshot.Spool(
             spoolTablesDerived = spoolTablesDerived.get(),
             spoolPushed = spoolPushed.get(),
             spoolPulled = spoolPulled.get(),
@@ -1219,6 +1286,11 @@ class MeshMetrics {
             spoolAttachPushed = spoolAttachPushed.get(),
             spoolAttachPulled = spoolAttachPulled.get(),
             spoolAttachDeferred = spoolAttachDeferred.get(),
+        )
+
+    /** The [Snapshot.Lora] counters alone, read now. */
+    fun lora(): Snapshot.Lora =
+        Snapshot.Lora(
             loraSent = loraSent.get(),
             loraFragSent = loraFragSent.get(),
             loraTranscoded = loraTranscoded.get(),
@@ -1247,6 +1319,11 @@ class MeshMetrics {
             loraStaleAtSend = loraStaleAtSend.get(),
             loraStaleAtSendByReason = loraStaleAtSendByReason.mapValues { it.value.get() },
             loraTickDeferred = loraTickDeferred.get(),
+        )
+
+    /** The [Snapshot.Meshtastic] counters alone, read now. */
+    fun meshtastic(): Snapshot.Meshtastic =
+        Snapshot.Meshtastic(
             meshPostHeard = meshPostHeard.get(),
             meshPostIngested = meshPostIngested.get(),
             meshPostViaMqtt = meshPostViaMqtt.get(),
@@ -1261,158 +1338,224 @@ class MeshMetrics {
             autoReplySent = autoReplySent.get(),
             autoReplyRefusedByReason = autoReplyRefusedByReason.mapValues { it.value.get() },
         )
-    }
 
     /**
-     * What resuming cut transfers did (#116): tails served, tails taken onto a kept prefix, and spliced files that
-     * failed their hash. Read through [fileResumes], not [Snapshot]: the snapshot's synthetic default constructor is
-     * at the JVM's 255-slot method limit (each `Long` takes two slots), so it cannot take a single field more — a new
-     * group of counters gets a read of its own like this one, or the snapshot is split first.
-     */
-    data class FileResumes(
-        val servedOut: Long = 0,
-        val takenIn: Long = 0,
-        val splicesRefused: Long = 0,
-    )
-
-    /** The resume counters ([FileResumes]), read beside [snapshot]. */
-    fun fileResumes(): FileResumes = FileResumes(filesResumedOut.get(), filesResumedIn.get(), splicesRefused.get())
-
-    /**
-     * Every counter, read at once. **Full:** its synthetic default constructor takes exactly the JVM's 255 parameter
-     * slots (each `Long` takes two), so one field more fails at class load with `ClassFormatError: Too many arguments
-     * in method signature` — about a hundred unrelated tests crash, not a compile error. A new counter gets a read of
-     * its own beside this one ([fileResumes]), or the snapshot is split into nested groups first.
+     * Every counter, read at once, in groups. The groups are load-bearing: a data class's synthetic default
+     * constructor takes two JVM parameter slots for each `Long`, and a method may take at most 255. A flat snapshot
+     * reached that at 129 counters, and one more fails at class load (`ClassFormatError: Too many arguments in method
+     * signature`), not at compile time, crashing every test that touches the class. A new counter goes into its group,
+     * and `MeshMetricsTest` fails a group that nears the limit. A counter keeps its full name inside its group, so
+     * `snapshot().lora.loraSent` reads the same as the debug bridge's `loraSent` key.
      */
     data class Snapshot(
-        val framesOriginated: Long,
-        val framesDelivered: Long,
-        val framesRelayed: Long,
-        val framesSuppressed: Long,
-        val framesDeduped: Long,
-        val bytesSent: Long,
-        val framesDropped: Long = 0,
-        val dropsByReason: Map<DropReason, Long> = emptyMap(),
-        val keyRequestsSent: Long = 0,
-        val introsSent: Long = 0,
-        val introsAnswered: Long = 0,
-        val keysServed: Long = 0,
-        val keysRecovered: Long = 0,
-        val framesHeld: Long = 0,
-        val framesReplayed: Long = 0,
-        val healsCompleted: Long = 0,
-        val blobAsksHandled: Long = 0,
-        val receiptsResent: Long = 0,
-        val dmSealedV2: Long = 0,
-        val dmSealedV3: Long = 0,
-        val ticksUnsigned: Long = 0,
-        val dmSealedV1Fallback: Long = 0,
-        val receiptsSealed: Long = 0,
-        val receiptsSealedFallback: Long = 0,
-        val receiptsCustodied: Long = 0,
-        val receiptsCoalesced: Long = 0,
-        val receiptsRidden: Long = 0,
-        val receiptsSpooled: Long = 0,
-        val reactionsSealed: Long = 0,
-        val reactionsSealedFallback: Long = 0,
-        val groupSealedRatchet: Long = 0,
-        val groupSealedV1Fallback: Long = 0,
-        val groupSeedsSent: Long = 0,
-        val groupSeedsAdopted: Long = 0,
-        val groupSeedsHeld: Long = 0,
-        val groupSeedsReplayed: Long = 0,
-        val groupKeyRequestsSent: Long = 0,
-        val groupRootsMinted: Long = 0,
-        val groupRootsAdopted: Long = 0,
-        val btConnectFails: Long = 0,
-        val btConnectFailsByReason: Map<ConnectFailReason, Long> = emptyMap(),
-        val btLinksEstablished: Long = 0,
-        val nanServesPeak: Long = 0,
-        val nanOwedNoLinkPeakMs: Long = 0,
-        val nanAcceptsRefused: Long = 0,
-        val nanIcmKeepaliveFailed: Long = 0,
-        val nanOffScreenRefusals: Long = 0,
-        val nanMsgsAcked: Long = 0,
-        val nanMsgSendsFailed: Long = 0,
-        val nanMsgPlaneStalledPeakMs: Long = 0,
-        val nanMsgPlaneCycles: Long = 0,
-        val filesSentNan: Long = 0,
-        val filesSentBt: Long = 0,
-        val nanBulkGraceTimeouts: Long = 0,
-        val fastCompactSent: Long = 0,
-        val fastLegacySent: Long = 0,
-        val fastFragSent: Long = 0,
-        val fastReassembled: Long = 0,
-        val fastTooBig: Long = 0,
-        val fastTranscodedSent: Long = 0,
-        val transcodeFallbacks: Long = 0,
-        val fastDropsByReason: Map<FastPathDrop, Long> = emptyMap(),
-        val bleSideOffered: Long = 0,
-        val bleSidePartsAired: Long = 0,
-        val bleSideTooBig: Long = 0,
-        val bleSideHeard: Long = 0,
-        val bleSideReassembled: Long = 0,
-        val bleSideDeduped: Long = 0,
-        val bleSideDropsByReason: Map<BleSideDrop, Long> = emptyMap(),
-        val bleLinkDupSkipped: Long = 0,
-        val bleCodedSightings: Long = 0,
-        val bleCodedDials: Long = 0,
-        val blePhyStepsDown: Long = 0,
-        val blePhyStepsUp: Long = 0,
-        val blePhyGiveUps: Long = 0,
-        val bleCodedAdvertDark: Long = 0,
-        val digestsReplaced: Long = 0,
-        val spoolTablesDerived: Long = 0,
-        val spoolPushed: Long = 0,
-        val spoolPulled: Long = 0,
-        val spoolBridged: Long = 0,
-        val spoolInvalid: Long = 0,
-        val spoolAccounted: Long = 0,
-        val spoolErrors: Long = 0,
-        val spoolAttachPushed: Long = 0,
-        val spoolAttachPulled: Long = 0,
-        val spoolAttachDeferred: Long = 0,
-        val loraSent: Long = 0,
-        val loraFragSent: Long = 0,
-        val loraTranscoded: Long = 0,
-        val loraPadded: Long = 0,
-        val loraReceived: Long = 0,
-        val loraReassembled: Long = 0,
-        val loraTooBig: Long = 0,
-        val loraDroppedQueue: Long = 0,
-        val loraAirtimeHeld: Long = 0,
-        val loraAirtimeHeldByBucket: Map<String, Long> = emptyMap(),
-        val loraSuppressed: Long = 0,
-        val loraNak: Long = 0,
-        val loraNakByReason: Map<String, Long> = emptyMap(),
-        val loraSessionUps: Long = 0,
-        val loraDmSent: Long = 0,
-        val loraDmReceived: Long = 0,
-        val loraReoffered: Long = 0,
-        val loraProfileRefanSkipped: Long = 0,
-        val loraOfferSent: Long = 0,
-        val loraOfferReceived: Long = 0,
-        val loraBridged: Long = 0,
-        val loraBridgeRefused: Long = 0,
-        val loraPassive: Long = 0,
-        val loraSkippedLinked: Long = 0,
-        val loraSkippedInternet: Long = 0,
-        val loraStaleAtSend: Long = 0,
-        val loraStaleAtSendByReason: Map<String, Long> = emptyMap(),
-        val loraTickDeferred: Long = 0,
-        val meshPostHeard: Long = 0,
-        val meshPostIngested: Long = 0,
-        val meshPostViaMqtt: Long = 0,
-        val meshPostMatched: Long = 0,
-        val meshPostVerified: Long = 0,
-        val meshPostBoardVerified: Long = 0,
-        val meshPostSignatureMismatch: Long = 0,
-        val meshPostRefusedByReason: Map<String, Long> = emptyMap(),
-        val publicPostSent: Long = 0,
-        val publicPostRefusedByReason: Map<String, Long> = emptyMap(),
-        val autoReplyHeard: Long = 0,
-        val autoReplySent: Long = 0,
-        val autoReplyRefusedByReason: Map<String, Long> = emptyMap(),
-        val framesHandedOn: Long = 0,
-    )
+        val frames: Frames = Frames(),
+        val keys: Keys = Keys(),
+        val seals: Seals = Seals(),
+        val receipts: Receipts = Receipts(),
+        val groups: Groups = Groups(),
+        val files: Files = Files(),
+        val bluetooth: Bluetooth = Bluetooth(),
+        val nan: Nan = Nan(),
+        val fast: FastPath = FastPath(),
+        val spool: Spool = Spool(),
+        val lora: Lora = Lora(),
+        val meshtastic: Meshtastic = Meshtastic(),
+    ) {
+        /** What the router did with frames — authored, delivered, relayed, handed on, suppressed, deduped, dropped
+         * (by [DropReason]) — the bytes it put on the wire, and the sync rounds around them: heal passes, and digests a
+         * newer one replaced in a link's queue. */
+        data class Frames(
+            val framesOriginated: Long = 0,
+            val framesDelivered: Long = 0,
+            val framesRelayed: Long = 0,
+            val framesHandedOn: Long = 0,
+            val framesSuppressed: Long = 0,
+            val framesDeduped: Long = 0,
+            val bytesSent: Long = 0,
+            val framesDropped: Long = 0,
+            val dropsByReason: Map<DropReason, Long> = emptyMap(),
+            val digestsReplaced: Long = 0,
+            val healsCompleted: Long = 0,
+        )
+
+        /**
+         * Recovering a sender's missing key: key requests, keys served and recovered, frames parked for a key and
+         * replayed, and the contact-card intros ([IntroSync]).
+         */
+        data class Keys(
+            val keyRequestsSent: Long = 0,
+            val keysServed: Long = 0,
+            val keysRecovered: Long = 0,
+            val framesHeld: Long = 0,
+            val framesReplayed: Long = 0,
+            val introsSent: Long = 0,
+            val introsAnswered: Long = 0,
+        )
+
+        /** How DMs and reactions were sealed, and how many fell back to an older form. */
+        data class Seals(
+            val dmSealedV2: Long = 0,
+            val dmSealedV3: Long = 0,
+            val dmSealedV1Fallback: Long = 0,
+            val reactionsSealed: Long = 0,
+            val reactionsSealedFallback: Long = 0,
+        )
+
+        /**
+         * Delivery ticks: sealed or sent cleartext, custodied, coalesced, ridden, spooled, re-sent, and the unsigned
+         * live-link form.
+         */
+        data class Receipts(
+            val receiptsResent: Long = 0,
+            val receiptsSealed: Long = 0,
+            val receiptsSealedFallback: Long = 0,
+            val receiptsCustodied: Long = 0,
+            val receiptsCoalesced: Long = 0,
+            val receiptsRidden: Long = 0,
+            val receiptsSpooled: Long = 0,
+            val ticksUnsigned: Long = 0,
+        )
+
+        /** Group messages, the seeds their keys travel in, key requests, and group roots. */
+        data class Groups(
+            val groupSealedRatchet: Long = 0,
+            val groupSealedV1Fallback: Long = 0,
+            val groupSeedsSent: Long = 0,
+            val groupSeedsAdopted: Long = 0,
+            val groupSeedsHeld: Long = 0,
+            val groupSeedsReplayed: Long = 0,
+            val groupKeyRequestsSent: Long = 0,
+            val groupRootsMinted: Long = 0,
+            val groupRootsAdopted: Long = 0,
+        )
+
+        /** Blobs over the radio links: files sent on each plane, blob asks handled, and cut transfers resumed (#116). */
+        data class Files(
+            val filesSentNan: Long = 0,
+            val filesSentBt: Long = 0,
+            val blobAsksHandled: Long = 0,
+            val filesResumedOut: Long = 0,
+            val filesResumedIn: Long = 0,
+            val splicesRefused: Long = 0,
+        )
+
+        /**
+         * The BLE links — connect failures by [ConnectFailReason], links made, Coded PHY steps — and the side
+         * channel's pages ([BleSideDrop]).
+         */
+        data class Bluetooth(
+            val btConnectFails: Long = 0,
+            val btConnectFailsByReason: Map<ConnectFailReason, Long> = emptyMap(),
+            val btLinksEstablished: Long = 0,
+            val bleLinkDupSkipped: Long = 0,
+            val bleCodedSightings: Long = 0,
+            val bleCodedDials: Long = 0,
+            val blePhyStepsDown: Long = 0,
+            val blePhyStepsUp: Long = 0,
+            val blePhyGiveUps: Long = 0,
+            val bleCodedAdvertDark: Long = 0,
+            val bleSideOffered: Long = 0,
+            val bleSidePartsAired: Long = 0,
+            val bleSideTooBig: Long = 0,
+            val bleSideHeard: Long = 0,
+            val bleSideReassembled: Long = 0,
+            val bleSideDeduped: Long = 0,
+            val bleSideDropsByReason: Map<BleSideDrop, Long> = emptyMap(),
+        )
+
+        /** Wi-Fi Aware: serves, owed links, refused accepts, the message plane, and bulk-preference timeouts. */
+        data class Nan(
+            val nanServesPeak: Long = 0,
+            val nanOwedNoLinkPeakMs: Long = 0,
+            val nanAcceptsRefused: Long = 0,
+            val nanIcmKeepaliveFailed: Long = 0,
+            val nanOffScreenRefusals: Long = 0,
+            val nanMsgsAcked: Long = 0,
+            val nanMsgSendsFailed: Long = 0,
+            val nanMsgPlaneStalledPeakMs: Long = 0,
+            val nanMsgPlaneCycles: Long = 0,
+            val nanBulkGraceTimeouts: Long = 0,
+        )
+
+        /**
+         * The fast plane: frames sent compact, legacy, fragmented or transcoded, reassembled, too big, and dropped
+         * ([FastPathDrop]).
+         */
+        data class FastPath(
+            val fastCompactSent: Long = 0,
+            val fastLegacySent: Long = 0,
+            val fastFragSent: Long = 0,
+            val fastReassembled: Long = 0,
+            val fastTooBig: Long = 0,
+            val fastTranscodedSent: Long = 0,
+            val transcodeFallbacks: Long = 0,
+            val fastDropsByReason: Map<FastPathDrop, Long> = emptyMap(),
+        )
+
+        /** The Internet (spool) plane. */
+        data class Spool(
+            val spoolTablesDerived: Long = 0,
+            val spoolPushed: Long = 0,
+            val spoolPulled: Long = 0,
+            val spoolBridged: Long = 0,
+            val spoolInvalid: Long = 0,
+            val spoolAccounted: Long = 0,
+            val spoolErrors: Long = 0,
+            val spoolAttachPushed: Long = 0,
+            val spoolAttachPulled: Long = 0,
+            val spoolAttachDeferred: Long = 0,
+        )
+
+        /** The LoRa plane. */
+        data class Lora(
+            val loraSent: Long = 0,
+            val loraFragSent: Long = 0,
+            val loraTranscoded: Long = 0,
+            val loraPadded: Long = 0,
+            val loraReceived: Long = 0,
+            val loraReassembled: Long = 0,
+            val loraTooBig: Long = 0,
+            val loraDroppedQueue: Long = 0,
+            val loraAirtimeHeld: Long = 0,
+            val loraAirtimeHeldByBucket: Map<String, Long> = emptyMap(),
+            val loraSuppressed: Long = 0,
+            val loraNak: Long = 0,
+            val loraNakByReason: Map<String, Long> = emptyMap(),
+            val loraSessionUps: Long = 0,
+            val loraDmSent: Long = 0,
+            val loraDmReceived: Long = 0,
+            val loraReoffered: Long = 0,
+            val loraProfileRefanSkipped: Long = 0,
+            val loraOfferSent: Long = 0,
+            val loraOfferReceived: Long = 0,
+            val loraBridged: Long = 0,
+            val loraBridgeRefused: Long = 0,
+            val loraPassive: Long = 0,
+            val loraSkippedLinked: Long = 0,
+            val loraSkippedInternet: Long = 0,
+            val loraStaleAtSend: Long = 0,
+            val loraStaleAtSendByReason: Map<String, Long> = emptyMap(),
+            val loraTickDeferred: Long = 0,
+        )
+
+        /**
+         * The Meshtastic room: posts heard and ingested, what their signatures proved, posts sent, and the DM
+         * auto-reply.
+         */
+        data class Meshtastic(
+            val meshPostHeard: Long = 0,
+            val meshPostIngested: Long = 0,
+            val meshPostViaMqtt: Long = 0,
+            val meshPostMatched: Long = 0,
+            val meshPostVerified: Long = 0,
+            val meshPostBoardVerified: Long = 0,
+            val meshPostSignatureMismatch: Long = 0,
+            val meshPostRefusedByReason: Map<String, Long> = emptyMap(),
+            val publicPostSent: Long = 0,
+            val publicPostRefusedByReason: Map<String, Long> = emptyMap(),
+            val autoReplyHeard: Long = 0,
+            val autoReplySent: Long = 0,
+            val autoReplyRefusedByReason: Map<String, Long> = emptyMap(),
+        )
+    }
 }

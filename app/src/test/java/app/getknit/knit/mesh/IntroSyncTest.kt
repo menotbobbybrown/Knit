@@ -78,7 +78,7 @@ class IntroSyncTest {
             rig.sync.onProfilePinned(BOB)
             assertEquals(listOf(BOB), rig.sent)
             assertEquals(IntroState.SENT, rig.sync.state(BOB).first())
-            assertEquals(1L, rig.metrics.snapshot().introsSent)
+            assertEquals(1L, rig.metrics.keys().introsSent)
 
             // A second pin (a re-flooded profile) inside the floor does not re-send.
             rig.sync.onProfilePinned(BOB)
@@ -156,7 +156,7 @@ class IntroSyncTest {
             rig.sync.onPeerFrameOpened(CAROL, initEph = INIT_1)
             rig.sync.onPeerFrameOpened(CAROL, initEph = INIT_1.copyOf())
             assertEquals(listOf(CAROL), rig.sent)
-            assertEquals(1L, rig.metrics.snapshot().introsAnswered)
+            assertEquals(1L, rig.metrics.keys().introsAnswered)
 
             rig.now += IntroSync.ANSWER_FLOOR_MS
             rig.sync.onPeerFrameOpened(CAROL, initEph = INIT_1)
@@ -184,7 +184,7 @@ class IntroSyncTest {
             rig.sealable += BOB
             rig.sync.onProfilePinned(BOB)
             assertEquals(listOf(BOB), rig.sent)
-            assertEquals(1L, rig.metrics.snapshot().introsAnswered)
+            assertEquals(1L, rig.metrics.keys().introsAnswered)
 
             // Owed once: a re-flooded profile and a re-serve of the init stay floored.
             rig.sync.onProfilePinned(BOB)
@@ -211,7 +211,7 @@ class IntroSyncTest {
             }
             rig.sync.onPeerFrameOpened(BOB, initEph = INIT_1)
             assertEquals(listOf(BOB), rig.sent)
-            assertEquals(1L, rig.metrics.snapshot().introsAnswered)
+            assertEquals(1L, rig.metrics.keys().introsAnswered)
         }
 
     @Test
@@ -231,7 +231,7 @@ class IntroSyncTest {
             }
             rig.sync.onPeerFrameOpened(BOB, initEph = INIT_1)
             assertEquals(listOf(BOB), rig.sent)
-            assertEquals(1L, rig.metrics.snapshot().introsAnswered)
+            assertEquals(1L, rig.metrics.keys().introsAnswered)
         }
 
     @Test
@@ -248,7 +248,7 @@ class IntroSyncTest {
             rig.sync.onPeerFrameOpened(CAROL, initEph = INIT_2)
             rig.sync.onPeerFrameOpened(CAROL, initEph = INIT_2)
             assertEquals("the new init's own repeats stay floored", 2, rig.sent.size)
-            assertEquals(2L, rig.metrics.snapshot().introsAnswered)
+            assertEquals(2L, rig.metrics.keys().introsAnswered)
         }
 
     @Test

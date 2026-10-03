@@ -252,7 +252,7 @@ class MeshRouterTest {
             assertEquals(Peer("z"), to)
             assertEquals(1, sent.hops) // the hop is counted, exactly as a relay counts one
             assertEquals(false, sent.relay) // …and it still goes no further at the addressee
-            assertEquals(1L, metrics.snapshot().framesHandedOn)
+            assertEquals(1L, metrics.frames().framesHandedOn)
         }
 
     @Test
@@ -444,7 +444,7 @@ class MeshRouterTest {
             advanceUntilIdle()
 
             assertEquals(0, transport.sent.size)
-            assertEquals(1, metrics.snapshot().framesSuppressed)
+            assertEquals(1, metrics.frames().framesSuppressed)
         }
 
     /**
@@ -474,8 +474,8 @@ class MeshRouterTest {
             advanceUntilIdle()
 
             assertEquals(setOf("c", "d"), transport.sent.mapNotNull { it.second?.nodeId }.toSet())
-            assertEquals(1, metrics.snapshot().framesRelayed)
-            assertEquals(0, metrics.snapshot().framesSuppressed)
+            assertEquals(1, metrics.frames().framesRelayed)
+            assertEquals(0, metrics.frames().framesSuppressed)
         }
 
     /**
@@ -506,9 +506,9 @@ class MeshRouterTest {
             advanceUntilIdle()
 
             assertEquals(setOf("c", "d"), transport.sent.mapNotNull { it.second?.nodeId }.toSet())
-            assertEquals(1, metrics.snapshot().framesRelayed)
-            assertEquals(1, metrics.snapshot().framesDeduped)
-            assertEquals(0, metrics.snapshot().framesSuppressed)
+            assertEquals(1, metrics.frames().framesRelayed)
+            assertEquals(1, metrics.frames().framesDeduped)
+            assertEquals(0, metrics.frames().framesSuppressed)
         }
 
     /**
@@ -538,9 +538,9 @@ class MeshRouterTest {
             advanceUntilIdle()
 
             assertEquals(setOf("c", "d"), transport.sent.mapNotNull { it.second?.nodeId }.toSet())
-            assertEquals(1, metrics.snapshot().framesRelayed)
-            assertEquals(1, metrics.snapshot().framesDeduped)
-            assertEquals(0, metrics.snapshot().framesSuppressed)
+            assertEquals(1, metrics.frames().framesRelayed)
+            assertEquals(1, metrics.frames().framesDeduped)
+            assertEquals(0, metrics.frames().framesSuppressed)
         }
 
     /** A spool-first relay is still suppressed — by two radio neighbours, exactly as a radio-first one is. */
@@ -568,8 +568,8 @@ class MeshRouterTest {
             advanceUntilIdle()
 
             assertTrue(transport.sent.isEmpty())
-            assertEquals(0, metrics.snapshot().framesRelayed)
-            assertEquals(1, metrics.snapshot().framesSuppressed)
+            assertEquals(0, metrics.frames().framesRelayed)
+            assertEquals(1, metrics.frames().framesSuppressed)
         }
 
     @Test
@@ -593,8 +593,8 @@ class MeshRouterTest {
 
             assertEquals(setOf("c", "d"), transport.sent.mapNotNull { it.second?.nodeId }.toSet())
             assertTrue(transport.sent.all { it.first.hops == 1 })
-            assertEquals(1, metrics.snapshot().framesRelayed)
-            assertEquals(0, metrics.snapshot().framesSuppressed)
+            assertEquals(1, metrics.frames().framesRelayed)
+            assertEquals(0, metrics.frames().framesSuppressed)
         }
 
     @Test
@@ -619,7 +619,7 @@ class MeshRouterTest {
 
             assertEquals(listOf("m1"), delivered)
             assertEquals(1, transport.sent.size)
-            assertEquals(1L, metrics.snapshot().dropsByReason[DropReason.INGRESS_REFUSED])
+            assertEquals(1L, metrics.frames().dropsByReason[DropReason.INGRESS_REFUSED])
 
             // A refused frame was never marked seen, so the custody re-serve brings it through once the bucket
             // refills — a delay, not a veto.
@@ -659,7 +659,7 @@ class MeshRouterTest {
             advanceUntilIdle()
 
             assertEquals(listOf("m1", "dm1"), delivered)
-            assertEquals(null, metrics.snapshot().dropsByReason[DropReason.INGRESS_REFUSED])
-            assertEquals(2L, metrics.snapshot().framesDeduped)
+            assertEquals(null, metrics.frames().dropsByReason[DropReason.INGRESS_REFUSED])
+            assertEquals(2L, metrics.frames().framesDeduped)
         }
 }

@@ -249,8 +249,8 @@ class ScopeSyncTest {
             assertEquals("the sender pushed its custody", 1, spool.pushed.size)
             assertEquals(listOf("m1"), receiver.delivered.map { it.id })
             assertTrue("the bridged frame lands in the receiver's custody", receiver.custody.has("m1"))
-            assertEquals(1, sender.metrics.snapshot().spoolPushed)
-            assertEquals(1, receiver.metrics.snapshot().spoolBridged)
+            assertEquals(1, sender.metrics.spool().spoolPushed)
+            assertEquals(1, receiver.metrics.spool().spoolBridged)
             sender.sync.stop()
             receiver.sync.stop()
         }
@@ -475,7 +475,7 @@ class ScopeSyncTest {
             assertEquals("the peer has it", listOf("tick-1"), receiver.delivered.map { it.id })
             assertEquals(1, spool.pushed.size)
             assertFalse("the pusher never custodied it", sender.custody.has("tick-1"))
-            assertEquals(1, sender.metrics.snapshot().spoolPushed)
+            assertEquals(1, sender.metrics.spool().spoolPushed)
 
             // The pusher's own heal loop must neither pull it back nor list on its account: many ticks, then
             // a dropped socket and a fresh session, and the scope reads converged throughout.
@@ -618,7 +618,7 @@ class ScopeSyncTest {
 
             pump(rounds = 60)
             assertEquals("the poll is a minute, not fifteen seconds", 3, derivations)
-            assertEquals("the device oracle counts the same derivations", 3L, member.metrics.snapshot().spoolTablesDerived)
+            assertEquals("the device oracle counts the same derivations", 3L, member.metrics.spool().spoolTablesDerived)
             member.sync.stop()
         }
 
@@ -704,7 +704,7 @@ class ScopeSyncTest {
             // A fresh spool starts empty and heals from whichever member is connected — the "client union
             // is the federation" property, with no spool-to-spool traffic anywhere.
             assertEquals(3, spool.liveIds(scopeHex(alice, bob)).size)
-            assertEquals(3, holder.metrics.snapshot().spoolPushed)
+            assertEquals(3, holder.metrics.spool().spoolPushed)
             holder.sync.stop()
         }
 
@@ -758,8 +758,8 @@ class ScopeSyncTest {
             // land — so the same blob legitimately arrives twice. Re-delivering is harmless (the router's
             // SeenSet dedups) but it would double-count the number Diagnostics shows as messages received.
             assertEquals(3, receiver.delivered.size)
-            assertEquals(3, receiver.metrics.snapshot().spoolBridged)
-            assertEquals(3, receiver.metrics.snapshot().spoolPulled)
+            assertEquals(3, receiver.metrics.spool().spoolBridged)
+            assertEquals(3, receiver.metrics.spool().spoolPulled)
             sender.sync.stop()
             receiver.sync.stop()
         }
@@ -811,7 +811,7 @@ class ScopeSyncTest {
             }
 
             assertEquals("and never again, across three reconnects", afterSweep, spool.pulled.size)
-            assertEquals("bridged once, not once per connection", 1, holder.metrics.snapshot().spoolBridged)
+            assertEquals("bridged once, not once per connection", 1, holder.metrics.spool().spoolBridged)
             holder.sync.stop()
         }
 
@@ -838,7 +838,7 @@ class ScopeSyncTest {
             assertTrue("the aged band is accounted, so the digests agree", scope.converged)
             assertEquals("and it is counted, so local == spool still reads as converged", scope.spoolCount, scope.localCount)
             assertEquals(1, scope.accountedCount)
-            assertEquals(1, holder.metrics.snapshot().spoolAccounted)
+            assertEquals(1, holder.metrics.spool().spoolAccounted)
             holder.sync.stop()
         }
 
@@ -1496,7 +1496,7 @@ class ScopeSyncTest {
                     .single()
                     .lastError,
             )
-            assertEquals("its garbage was pulled once the spool answered", 1, holder.metrics.snapshot().spoolInvalid)
+            assertEquals("its garbage was pulled once the spool answered", 1, holder.metrics.spool().spoolInvalid)
             holder.sync.stop()
         }
 
@@ -1509,13 +1509,13 @@ class ScopeSyncTest {
 
             victim.sync.start(backgroundScope)
             pump()
-            val afterFirst = victim.metrics.snapshot().spoolInvalid
+            val afterFirst = victim.metrics.spool().spoolInvalid
             pump()
 
             assertTrue("the garbage must be quarantined", afterFirst >= 1)
             assertTrue("nothing forged is ever delivered", victim.delivered.isEmpty())
-            assertEquals("a quarantined id is never re-pulled", afterFirst, victim.metrics.snapshot().spoolInvalid)
-            assertEquals(0, victim.metrics.snapshot().spoolBridged)
+            assertEquals("a quarantined id is never re-pulled", afterFirst, victim.metrics.spool().spoolInvalid)
+            assertEquals(0, victim.metrics.spool().spoolBridged)
             victim.sync.stop()
         }
 
@@ -1530,12 +1530,12 @@ class ScopeSyncTest {
 
             victim.sync.start(backgroundScope)
             pump()
-            val afterFirst = victim.metrics.snapshot().spoolInvalid
+            val afterFirst = victim.metrics.spool().spoolInvalid
             pump()
 
             assertTrue("an oversize answer must still be accounted", afterFirst >= 1)
             assertTrue(victim.delivered.isEmpty())
-            assertEquals("a quarantined id is never re-pulled", afterFirst, victim.metrics.snapshot().spoolInvalid)
+            assertEquals("a quarantined id is never re-pulled", afterFirst, victim.metrics.spool().spoolInvalid)
             assertEquals("...so it is asked for exactly once", 1, spool.pulled.count { it == id })
             victim.sync.stop()
         }
@@ -1565,7 +1565,7 @@ class ScopeSyncTest {
             }
             pump()
 
-            assertEquals("an oversize event is not ours to quarantine", 0, victim.metrics.snapshot().spoolInvalid)
+            assertEquals("an oversize event is not ours to quarantine", 0, victim.metrics.spool().spoolInvalid)
             assertTrue(victim.delivered.isEmpty())
             victim.sync.stop()
         }
@@ -1587,7 +1587,7 @@ class ScopeSyncTest {
 
             assertTrue(receiver.delivered.isEmpty())
             assertFalse(receiver.custody.has("m1"))
-            assertTrue(receiver.metrics.snapshot().spoolInvalid >= 1)
+            assertTrue(receiver.metrics.spool().spoolInvalid >= 1)
             sender.sync.stop()
             receiver.sync.stop()
         }
@@ -1608,7 +1608,7 @@ class ScopeSyncTest {
             // and letting it in would hand the spool a way to evict the entries that matter.
             spool.gossip(SpoolCodec.encode(SpoolEvent(t = SpoolRecordType.EVENT, scope = scope, blobId = unhex(id), data = garbage)))
             pump()
-            assertEquals("an unsolicited failure is not ours to quarantine", 0, victim.metrics.snapshot().spoolInvalid)
+            assertEquals("an unsolicited failure is not ours to quarantine", 0, victim.metrics.spool().spoolInvalid)
             assertEquals(
                 0,
                 victim.sync
@@ -1625,7 +1625,7 @@ class ScopeSyncTest {
             pump()
             pump()
 
-            assertEquals(1, victim.metrics.snapshot().spoolInvalid)
+            assertEquals(1, victim.metrics.spool().spoolInvalid)
             assertEquals("asked for exactly once", 1, spool.pulled.count { it == id })
             assertTrue(victim.delivered.isEmpty())
             victim.sync.stop()
@@ -1660,8 +1660,8 @@ class ScopeSyncTest {
             pump()
 
             assertEquals(listOf("m1"), victim.delivered.map { it.id })
-            assertEquals(1, victim.metrics.snapshot().spoolBridged)
-            assertEquals(0, victim.metrics.snapshot().spoolInvalid)
+            assertEquals(1, victim.metrics.spool().spoolBridged)
+            assertEquals(0, victim.metrics.spool().spoolInvalid)
             victim.sync.stop()
         }
 
@@ -1677,7 +1677,7 @@ class ScopeSyncTest {
             pump()
             receiver.sync.start(backgroundScope)
             pump()
-            assertEquals(1, receiver.metrics.snapshot().spoolBridged)
+            assertEquals(1, receiver.metrics.spool().spoolBridged)
 
             // More garbage than the guard holds. Every one of these claims a slot and fails; if a claim
             // could evict, m1 would be pushed out and — once custody sweeps it — pulled and bridged again.
@@ -1689,8 +1689,8 @@ class ScopeSyncTest {
             receiver.custody.sweep("m1")
             pump(rounds = 120)
 
-            assertEquals("m1 stayed guarded — bridged once, not once more after the sweep", 1, receiver.metrics.snapshot().spoolBridged)
-            assertEquals(0, receiver.metrics.snapshot().spoolInvalid)
+            assertEquals("m1 stayed guarded — bridged once, not once more after the sweep", 1, receiver.metrics.spool().spoolBridged)
+            assertEquals(0, receiver.metrics.spool().spoolInvalid)
             sender.sync.stop()
             receiver.sync.stop()
         }
@@ -1753,8 +1753,8 @@ class ScopeSyncTest {
                     .single()
                     .lastError,
             )
-            assertTrue(victim.metrics.snapshot().spoolErrors >= 1)
-            assertEquals("and nothing quarantined on its say-so", 0, victim.metrics.snapshot().spoolInvalid)
+            assertTrue(victim.metrics.spool().spoolErrors >= 1)
+            assertEquals("and nothing quarantined on its say-so", 0, victim.metrics.spool().spoolInvalid)
             victim.sync.stop()
         }
 
@@ -1790,7 +1790,7 @@ class ScopeSyncTest {
             pump()
 
             assertEquals("the round ran: the garbage it named was pulled and quarantined", 1, spool.pulled.count { it == id })
-            assertEquals(1, victim.metrics.snapshot().spoolInvalid)
+            assertEquals(1, victim.metrics.spool().spoolInvalid)
             assertNull(
                 victim.sync
                     .status()
@@ -1817,7 +1817,7 @@ class ScopeSyncTest {
             pump()
 
             assertEquals(1, spool.pushed.size)
-            assertEquals(1, sender.metrics.snapshot().spoolPushed)
+            assertEquals(1, sender.metrics.spool().spoolPushed)
             sender.sync.stop()
         }
 
@@ -1936,15 +1936,15 @@ class ScopeSyncTest {
             // 100 000 bytes at the spec's 48 KiB chunk: three chunks, uploaded whole.
             val aid = aidHex(alice, bob, aHash)
             assertEquals(3, spool.chunkCount(scopeHex(alice, bob), aid))
-            assertEquals(3, sender.metrics.snapshot().spoolAttachPushed)
+            assertEquals(3, sender.metrics.spool().spoolAttachPushed)
 
             // The receiver got the frame, then the bytes it names — verified against that same address.
             assertEquals(listOf("m1"), receiver.delivered.map { it.id })
             assertTrue("the image landed locally", receiver.blobs.stored.containsKey(aHash))
             assertTrue(bytes.contentEquals(receiver.blobs.stored.getValue(aHash)))
             assertEquals(listOf(aHash), receiver.obtained)
-            assertEquals(1, receiver.metrics.snapshot().spoolAttachPulled)
-            assertEquals(0, receiver.metrics.snapshot().spoolInvalid)
+            assertEquals(1, receiver.metrics.spool().spoolAttachPulled)
+            assertEquals(0, receiver.metrics.spool().spoolInvalid)
             sender.sync.stop()
             receiver.sync.stop()
         }
@@ -2029,7 +2029,7 @@ class ScopeSyncTest {
             pump(rounds = 16)
 
             assertFalse("the garbage never becomes a stored image", receiver.blobs.stored.containsKey(aHash))
-            assertEquals(1, receiver.metrics.snapshot().spoolInvalid)
+            assertEquals(1, receiver.metrics.spool().spoolInvalid)
             // The whole point of the invalid set: an accounted failure, not an infinite re-pull.
             assertEquals("no further aget after the quarantine", afterFirst, spool.chunkGets.size)
             sender.sync.stop()
@@ -2057,7 +2057,7 @@ class ScopeSyncTest {
             spool.corruptChunk(scope, aid, index = 0)
             receiver.sync.start(backgroundScope)
             pump(rounds = 16)
-            assertEquals(1, receiver.metrics.snapshot().spoolInvalid)
+            assertEquals(1, receiver.metrics.spool().spoolInvalid)
             assertFalse(receiver.blobs.stored.containsKey(aHash))
 
             // The spool's copy is mended (a member re-uploads the chunk it now lacks, on its next session —
@@ -2102,7 +2102,7 @@ class ScopeSyncTest {
             pump(rounds = 12)
 
             assertEquals(emptyList<String>(), spool.chunksPut)
-            assertEquals(0, sender.metrics.snapshot().spoolAttachPushed)
+            assertEquals(0, sender.metrics.spool().spoolAttachPushed)
             sender.sync.stop()
         }
 
@@ -2124,10 +2124,10 @@ class ScopeSyncTest {
             assertEquals(emptyList<String>(), spool.chunksPut)
             // Deferring before the `ahave` is the point: no chunks *and* no round trip.
             assertEquals(emptyList<String>(), spool.presenceAsks)
-            assertEquals(0, sender.metrics.snapshot().spoolAttachPushed)
-            assertTrue("the deferral is counted", sender.metrics.snapshot().spoolAttachDeferred > 0)
+            assertEquals(0, sender.metrics.spool().spoolAttachPushed)
+            assertTrue("the deferral is counted", sender.metrics.spool().spoolAttachDeferred > 0)
             // The frame itself is untouched by the gate — only its bytes wait.
-            assertEquals(1, sender.metrics.snapshot().spoolPushed)
+            assertEquals(1, sender.metrics.spool().spoolPushed)
             sender.sync.stop()
         }
 

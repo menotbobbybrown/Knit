@@ -99,7 +99,7 @@ val meshModule =
         single { MeshBlobStore(get(), get(), get(), File(androidContext().cacheDir, "blobtx")) }
         // The prefixes of attachments a link drop cut off, one store for both radios and BlobExchange (#116):
         // session-scoped (MeshManager.start purges it beside the blobtx copies), so no plaintext outlives a session.
-        single { PartialBlobs(File(androidContext().cacheDir, "blob-partials")) }
+        single { PartialBlobs(File(androidContext().cacheDir, "blob-partials"), log = { Log.d("PartialBlobs", it) }) }
         // Demo-screenshot builds (debug-only, `-PseedDemo=true`) swap in a no-op transport that just reports a
         // few connected neighbors (so the UI looks "connected" against the seeded data); the seam returns null
         // in release, where the demo classes don't ship (see the per-variant di/DemoWiring). Production wraps

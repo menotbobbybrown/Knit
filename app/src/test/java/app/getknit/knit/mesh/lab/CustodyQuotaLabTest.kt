@@ -58,17 +58,13 @@ class CustodyQuotaLabTest {
             lab.assertConverged(listOf(alice, carol), atLeast = 2, carriers = listOf(bob)) { it.dmWith(if (it === alice) carol else alice) }
 
             lab.unlink(bob, carol)
-            val relayedBefore = bob.metrics.snapshot().framesRelayed
             (1..7).forEach { assertTrue(alice.sendDm(carol, "apart $it")) }
-            // Wait for Bob's relay decision on all seven, not for a count of five in his custody: the router
-            // schedules each first-seen frame's relay after a 0–150 ms jitter, and under load that job can
-            // run after the link comes up — it then hands Carol frames custody has already evicted (the first
-            // runs flaked exactly so, delivering six or seven).
-            assertTrue("bob's relays never fired", lab.tryAwait(7) { (bob.metrics.snapshot().framesRelayed - relayedBefore).toInt() })
+            val apart = (1..7).map { alice.ownMessageId(alice.dmWith(carol), "apart $it") }
+            awaitCustody(bob, of = apart, holding = apart.drop(2))
             assertEquals("bob keeps alice's newest five DMs, not seven", 5, bob.custodiedChatsFrom(alice, carol))
             assertEquals("alice's own store keeps the same five", 5, alice.custodiedChatsFrom(alice, carol))
 
-            lab.link(bob, carol)
+            linkForCustodyOnly(bob, carol)
             lab.assertConverged(listOf(carol), atLeast = 7, carriers = listOf(alice, bob)) { it.dmWith(alice) }
             assertEquals(setOf("hello", "hi") + (3..7).map { "apart $it" }, carol.decrypted(carol.dmWith(alice)).map { it.second }.toSet())
             assertEquals("nothing failed to decrypt past the hole", 0L, carol.drops(DropReason.DECRYPT_FAILED))
@@ -92,12 +88,11 @@ class CustodyQuotaLabTest {
             lab.awaitAcquainted(alice, bob, carol)
 
             lab.unlink(bob, carol)
-            val relayedBefore = bob.metrics.snapshot().framesRelayed
             (1..7).forEach { assertTrue(alice.sendDm(carol, "apart $it")) }
-            assertTrue(lab.tryAwait(7) { (bob.metrics.snapshot().framesRelayed - relayedBefore).toInt() })
-            assertEquals(5, bob.custodiedChatsFrom(alice, carol))
+            val apart = (1..7).map { alice.ownMessageId(alice.dmWith(carol), "apart $it") }
+            awaitCustody(bob, of = apart, holding = apart.drop(2))
 
-            lab.link(bob, carol)
+            linkForCustodyOnly(bob, carol)
             lab.assertConverged(listOf(carol), atLeast = 5, carriers = listOf(alice, bob)) { it.dmWith(alice) }
             assertEquals((3..7).map { "apart $it" }.toSet(), carol.decrypted(carol.dmWith(alice)).map { it.second }.toSet())
             assertEquals(0L, carol.drops(DropReason.DECRYPT_FAILED))
@@ -119,19 +114,17 @@ class CustodyQuotaLabTest {
             lab.assertConverged(listOf(alice, bob, carol), atLeast = 1) { groupId }
 
             lab.unlink(bob, carol)
-            val relayedBefore = bob.metrics.snapshot().framesRelayed
             (1..5).forEach { assertTrue(alice.sendGroup(groupId, "apart $it")) }
-            assertTrue(lab.tryAwait(5) { (bob.metrics.snapshot().framesRelayed - relayedBefore).toInt() })
-            assertEquals(3, bob.custodyIds().count { it in (1..5).map { n -> alice.ownMessageId(groupId, "apart $n") } })
+            val apart = (1..5).map { alice.ownMessageId(groupId, "apart $it") }
+            awaitCustody(bob, of = apart, holding = apart.drop(2))
 
-            lab.link(bob, carol)
+            linkForCustodyOnly(bob, carol)
             assertTrue(
                 "carol never read the newest three",
                 lab.tryAwait(1) {
                     if (carol.decrypted(groupId).map { it.second }.containsAll((3..5).map { "apart $it" })) 1 else 0
                 },
             )
-            lab.settle()
             assertEquals(
                 "the evicted two never arrive",
                 (3..5)
@@ -160,4 +153,35 @@ class CustodyQuotaLabTest {
             lab.assertConverged(listOf(alice, bob, carol), atLeast = 9) { Conversations.NEARBY }
             assertTrue("the cap held", alice.custodyIds().size <= 12)
         }
+
+    /**
+     * Waits until [carrier]'s custody holds exactly [holding] of the frames [of] — every one of them handled, so
+     * the quota has evicted the rest — and fails with what it holds instead. Custody only reaches that set once
+     * the newest frame is in, which a count of the carrier's relays since a baseline cannot promise: a relay of
+     * an earlier frame still in its 0–150 ms jitter when the baseline was read lands inside the count, which
+     * then passes with a newer frame not yet handled.
+     */
+    private suspend fun awaitCustody(
+        carrier: LabNode,
+        of: List<String>,
+        holding: List<String>,
+    ) {
+        val held = suspend { carrier.custodyIds().filterTo(HashSet()) { it in of } }
+        val settled = lab.tryAwait(1) { if (held() == holding.toSet()) 1 else 0 }
+        assertTrue("${carrier.name} never custodied exactly the newest ${holding.size}: holds ${held()} of $of", settled)
+    }
+
+    /**
+     * Brings Bob back to Carol with the air losing his *relays* toward her: a copy he forwards carries
+     * `hops > 0`, while what he serves from custody or originates is stamped fresh at 0
+     * (`StrangerBacklogLabTest.linkForTheBacklogOnly`). A relay filed before the quota evicted its frame decides
+     * its targets only when its jitter runs out — after this link, under load — and would hand Carol a frame
+     * no store holds any more (the first runs flaked so, delivering six or seven). What she must get, custody
+     * carries. A copy lost here is repaired only by the next digest exchange, at the next link-up or the 60 s
+     * re-offer, so a scenario that has Alice send toward Carol after this link would wait out that tick.
+     */
+    private fun linkForCustodyOnly(
+        bob: LabNode,
+        carol: LabNode,
+    ) = bob.transport.connect(carol.transport, lossy = { it.hops > 0 })
 }

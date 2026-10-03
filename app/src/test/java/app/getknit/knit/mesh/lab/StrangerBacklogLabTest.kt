@@ -87,7 +87,7 @@ class StrangerBacklogLabTest {
                 "carol refused ${(refusedForWantOfKey() intersect posts).size} of alice's $POSTS posts\n${lab.report(listOf(bob, carol))}",
                 lab.tryAwait(POSTS) { (refusedForWantOfKey() intersect posts).size },
             )
-            assertTrue("carol parked the backlog", carol.metrics.snapshot().framesHeld >= POSTS)
+            assertTrue("carol parked the backlog", carol.metrics.keys().framesHeld >= POSTS)
             assertTrue(
                 "bob never answered carol's key request",
                 // Two: the key he sends ahead of the backlog, then at least one answer to her request.
@@ -104,7 +104,7 @@ class StrangerBacklogLabTest {
                 lab.tryAwait(1) { if ((bob.custodyIds() - carol.custodyIds()).isEmpty()) 1 else 0 },
             )
             val snap = carol.metrics.snapshot()
-            assertEquals("every parked frame replayed", snap.framesHeld, snap.framesReplayed)
+            assertEquals("every parked frame replayed", snap.keys.framesHeld, snap.keys.framesReplayed)
         }
 
     /**
@@ -158,10 +158,10 @@ class StrangerBacklogLabTest {
             // Her key request is what brought the key: recovery counts only a key she asked for. Not "she refused a
             // post": the first frame of Alice's she meets may be Alice's answer to Bob's tick, and the key it asks
             // for can land ahead of every post.
-            assertTrue("carol never recovered alice's key by asking", carol.metrics.snapshot().keysRecovered >= 1)
+            assertTrue("carol never recovered alice's key by asking", carol.metrics.keys().keysRecovered >= 1)
             assertCarolShortNothingBobCarries(bob, carol)
             val snap = carol.metrics.snapshot()
-            assertEquals("every parked frame replayed", snap.framesHeld, snap.framesReplayed)
+            assertEquals("every parked frame replayed", snap.keys.framesHeld, snap.keys.framesReplayed)
         }
 
     /**

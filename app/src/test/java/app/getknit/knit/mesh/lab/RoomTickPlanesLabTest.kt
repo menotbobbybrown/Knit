@@ -77,7 +77,7 @@ class RoomTickPlanesLabTest {
             val bob = lab.node("bob", limits, air = air, spool = spool).apply { setDisplayName("Bob") }
             lab.meetOnTheRelay(alice, bob, air)
             val bobFarBefore = bob.loraTx("far:chat")
-            val aliceSkippedBefore = alice.metrics.snapshot().loraSkippedInternet
+            val aliceSkippedBefore = alice.metrics.lora().loraSkippedInternet
 
             assertTrue(alice.sendRoom("over the board"))
             val post = alice.ownMessageId(Conversations.NEARBY, "over the board")
@@ -87,7 +87,7 @@ class RoomTickPlanesLabTest {
             val dm = alice.ownMessageId(alice.dmWith(bob), "and now over the relay")
             lab.await(1) { bob.decrypted(bob.dmWith(alice)).count { it.first == dm } }
             assertEquals("the DM took the relay", DeliveryPlane.Internet, bob.receivedVia(bob.dmWith(alice), dm))
-            assertTrue("and its LoRa copy was never sent", alice.metrics.snapshot().loraSkippedInternet > aliceSkippedBefore)
+            assertTrue("and its LoRa copy was never sent", alice.metrics.lora().loraSkippedInternet > aliceSkippedBefore)
 
             assertEquals("the room tick rode the DM's receipt", DeliveryPlane.Internet, lab.awaitReceipt(alice, post, bob))
             assertEquals(DeliveryPlane.Internet, lab.awaitReceipt(alice, dm, bob))
@@ -98,7 +98,7 @@ class RoomTickPlanesLabTest {
                 "the ride was never counted",
                 lab.tryAwait(1) {
                     bob.metrics
-                        .snapshot()
+                        .receipts()
                         .receiptsRidden
                         .toInt()
                 },
@@ -123,7 +123,7 @@ class RoomTickPlanesLabTest {
                 lab.tryAwait(1, timeoutMs = MeshLab.SPOOL_AWAIT_MS) { if (bob.dmScopeStatus(alice)?.converged == true) 1 else 0 },
             )
             val custodiedBefore = bob.custodiedChatsTo(alice)
-            val accountedBefore = bob.metrics.snapshot().spoolAccounted
+            val accountedBefore = bob.metrics.spool().spoolAccounted
             // The band can already hold a frame the pair exchanged while linked: its link copy delivered first,
             // its spool copy accepted before that delivery's custody write landed, so it reads accounted and held
             // at once (harmless — Diagnostics' "aged" count reads one high). The tick is one more than that.
@@ -142,16 +142,16 @@ class RoomTickPlanesLabTest {
                 "the spooled tick was never counted",
                 lab.tryAwait(1) {
                     bob.metrics
-                        .snapshot()
+                        .receipts()
                         .receiptsSpooled
                         .toInt()
                 },
             )
-            assertEquals(1L, bob.metrics.snapshot().receiptsSpooled)
+            assertEquals(1L, bob.metrics.receipts().receiptsSpooled)
             assertEquals("no custody row for it", custodiedBefore, bob.custodiedChatsTo(alice))
             assertTrue(
                 "accounted instead, so bob's own heal loop never pulls it back",
-                lab.tryAwait(1) { if (bob.metrics.snapshot().spoolAccounted == accountedBefore + 1) 1 else 0 },
+                lab.tryAwait(1) { if (bob.metrics.spool().spoolAccounted == accountedBefore + 1) 1 else 0 },
             )
             assertEquals("and nothing on the air", 0, bob.loraTx("send:chat"))
             val settled =
@@ -179,6 +179,6 @@ class RoomTickPlanesLabTest {
             lab.link(alice, bob)
             lab.assertConverged(listOf(alice, bob), atLeast = 1) { Conversations.NEARBY }
             assertEquals(1, alice.receiptPlanes(post).size)
-            assertEquals("the re-link re-served the tick, it did not re-send it", 0L, bob.metrics.snapshot().receiptsResent)
+            assertEquals("the re-link re-served the tick, it did not re-send it", 0L, bob.metrics.receipts().receiptsResent)
         }
 }

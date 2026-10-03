@@ -235,16 +235,16 @@ class LoraBridgeTest {
             advanceTimeBy(5_000)
             runCurrent()
             assertFalse("the live plane refuses a custody re-serve", b.received.any { it.envelope.id == idOf(old) })
-            assertTrue(a.metrics.snapshot().loraSuppressed > 0)
+            assertTrue(a.metrics.lora().loraSuppressed > 0)
 
             // Let the two pockets converge on what they already hold, then introduce the stale frame.
             repeat(2) {
                 advanceTimeBy(LoraGossipPolicy.MAX_INTERVAL_MS)
                 runCurrent()
             }
-            assertTrue("bob offered", b.metrics.snapshot().loraOfferSent > 0)
-            assertTrue("alice heard it", a.metrics.snapshot().loraOfferReceived > 0)
-            val bridgedBefore = a.metrics.snapshot().loraBridged
+            assertTrue("bob offered", b.metrics.lora().loraOfferSent > 0)
+            assertTrue("alice heard it", a.metrics.lora().loraOfferReceived > 0)
+            val bridgedBefore = a.metrics.lora().loraBridged
 
             // The bridge reads it from custody instead, on the next round of offers.
             a.custody.held += old
@@ -257,7 +257,7 @@ class LoraBridgeTest {
             assertEquals(
                 "served once and not again, because bob's next offer names it",
                 bridgedBefore + 1,
-                a.metrics.snapshot().loraBridged,
+                a.metrics.lora().loraBridged,
             )
         }
 
@@ -287,7 +287,7 @@ class LoraBridgeTest {
             // at 30.8 — just inside her fourth interval, whose own transmit point is 37.5.
             advanceTimeBy(28 * 60_000 + 20_000)
             runCurrent()
-            val offersBefore = a.metrics.snapshot().loraOfferSent
+            val offersBefore = a.metrics.lora().loraOfferSent
             assertEquals("three intervals, three offers", 3L, offersBefore)
 
             val b = rig(air, 2u, "bob", backgroundScope, mute = true) { testScheduler.currentTime }
@@ -299,9 +299,9 @@ class LoraBridgeTest {
 
             advanceTimeBy(toFirstOffer) // bob's first interval midpoint, at 30.8 min
             runCurrent()
-            assertEquals("alice heard bob", 1L, a.metrics.snapshot().loraOfferReceived)
-            assertEquals("and has nothing to serve him", 0L, a.metrics.snapshot().loraBridged)
-            assertEquals("nor has she spoken yet", offersBefore, a.metrics.snapshot().loraOfferSent)
+            assertEquals("alice heard bob", 1L, a.metrics.lora().loraOfferReceived)
+            assertEquals("and has nothing to serve him", 0L, a.metrics.lora().loraBridged)
+            assertEquals("nor has she spoken yet", offersBefore, a.metrics.lora().loraOfferSent)
 
             // On her own schedule the next one was 6.7 minutes out, and 21.7 if she woke to a lapsed reset.
             advanceTimeBy(LoraGossipPolicy.MIN_INTERVAL_MS)
@@ -309,9 +309,9 @@ class LoraBridgeTest {
             assertEquals(
                 "alice answers inside a floor interval rather than waiting out her backoff",
                 offersBefore + 1,
-                a.metrics.snapshot().loraOfferSent,
+                a.metrics.lora().loraOfferSent,
             )
-            assertEquals("and no frame crossed to explain it", 0L, b.metrics.snapshot().loraBridged)
+            assertEquals("and no frame crossed to explain it", 0L, b.metrics.lora().loraBridged)
         }
 
     /**
@@ -345,7 +345,7 @@ class LoraBridgeTest {
             assertTrue("the room post crosses", b.received.any { it.envelope.id == idOf(room) })
             assertFalse("the DM for a linked peer stays off the air", b.received.any { it.envelope.id == idOf(toLinked) })
             assertFalse("the DM for the gateway itself stays off the air", b.received.any { it.envelope.id == idOf(toSelf) })
-            assertEquals(2L, a.metrics.snapshot().loraSkippedLinked)
+            assertEquals(2L, a.metrics.lora().loraSkippedLinked)
         }
 
     /**
@@ -371,7 +371,7 @@ class LoraBridgeTest {
             runCurrent()
             a.transport.fastFanout(carol)
             runCurrent()
-            assertEquals("the fan-out stops re-offering the same publish", 1L, a.metrics.snapshot().loraProfileRefanSkipped)
+            assertEquals("the fan-out stops re-offering the same publish", 1L, a.metrics.lora().loraProfileRefanSkipped)
 
             // A far pocket comes up afterwards, having never heard it — and cannot ask for it, since this
             // plane refuses `keyreq`. Its offer names what it holds, and the repair path must still answer.
@@ -540,8 +540,8 @@ class LoraBridgeTest {
             runCurrent()
 
             assertEquals("the passive board transmitted nothing", passiveSentBefore, passive.link.sent.size)
-            assertTrue(passive.metrics.snapshot().loraPassive > 0)
-            assertTrue("the active one carried it", active.metrics.snapshot().loraSent > 0)
+            assertTrue(passive.metrics.lora().loraPassive > 0)
+            assertTrue("the active one carried it", active.metrics.lora().loraSent > 0)
             assertEquals("bob got exactly one copy", 1, b.received.count { it.envelope.id == idOf(post) })
 
             // And bob, in the other pocket, is never suppressed by either of them.
@@ -621,7 +621,7 @@ class LoraBridgeTest {
             assertEquals("the co-pocket board speaks for the pocket now", sentBefore, a.link.sent.size)
             // The beacon and the OFFER are role-gated too, so the count is "at least this frame" — what
             // matters is that the role is the reason and no other gate fired.
-            val byReason = a.metrics.snapshot().loraStaleAtSendByReason
+            val byReason = a.metrics.lora().loraStaleAtSendByReason
             assertTrue("the role refused it", (byReason[StaleAtSend.PASSIVE.name] ?: 0L) >= 1L)
             assertEquals(setOf(StaleAtSend.PASSIVE.name), byReason.keys)
         }
@@ -666,7 +666,7 @@ class LoraBridgeTest {
             )
             // The role may refuse the beacon and the OFFER beside it; the targeted send must never be among
             // them, and no recipient gate applies to it at all.
-            assertNull(a.metrics.snapshot().loraStaleAtSendByReason[StaleAtSend.LINKED.name])
+            assertNull(a.metrics.lora().loraStaleAtSendByReason[StaleAtSend.LINKED.name])
         }
 
     @Test
@@ -736,7 +736,7 @@ class LoraBridgeTest {
             advanceTimeBy(toFirstOffer + 30_000)
             runCurrent()
 
-            assertTrue("bob offered", b.metrics.snapshot().loraOfferSent > 0)
+            assertTrue("bob offered", b.metrics.lora().loraOfferSent > 0)
             assertEquals("the offer alone proves a radio is there", 1, a.status().boardsHeard)
             assertEquals("but nobody has spoken, so no person is reachable yet", 0, a.status().heard)
         }
@@ -869,7 +869,7 @@ class LoraBridgeTest {
             assertTrue("the newcomer is served the history it lacks", t.received.isNotEmpty())
             assertTrue(
                 "and it is served the author's profile first, so it can verify anything at all",
-                a.metrics.snapshot().loraSent > 0,
+                a.metrics.lora().loraSent > 0,
             )
         }
 
@@ -915,9 +915,9 @@ class LoraBridgeTest {
                 runCurrent()
             }
 
-            assertEquals("alice serves nothing — that budget is gone", 0L, a.metrics.snapshot().loraBridged)
-            assertTrue("but her own offers still reach the air", a.metrics.snapshot().loraOfferSent > 0)
-            assertTrue("so bob learns what she lacks", b.metrics.snapshot().loraOfferReceived > 0)
+            assertEquals("alice serves nothing — that budget is gone", 0L, a.metrics.lora().loraBridged)
+            assertTrue("but her own offers still reach the air", a.metrics.lora().loraOfferSent > 0)
+            assertTrue("so bob learns what she lacks", b.metrics.lora().loraOfferReceived > 0)
             assertTrue(
                 "and the frame he was holding for her crosses",
                 a.received.any { it.envelope.id == idOf(heldForAlice) },
@@ -1081,7 +1081,7 @@ class LoraBridgeTest {
             runCurrent()
 
             val now = testScheduler.currentTime
-            assertTrue("the offer flew", a.metrics.snapshot().loraOfferSent > 0)
+            assertTrue("the offer flew", a.metrics.lora().loraOfferSent > 0)
             assertTrue("and booked its own bucket", ledger.usedMs(AirBucket.GOSSIP, now) > 0)
             assertEquals("leaving serving's share untouched", 0L, ledger.usedMs(AirBucket.BRIDGE, now))
         }
@@ -1144,7 +1144,7 @@ class LoraBridgeTest {
             val crossed = b.received.mapTo(HashSet()) { it.envelope.id }
             assertFalse("the room post is genuinely unaffordable", idOf(room) in crossed)
             assertTrue("but the cheap frame ranked behind it still crossed", idOf(dm) in crossed)
-            val held = a.metrics.snapshot().loraAirtimeHeldByBucket[AirBucket.BRIDGE.name] ?: 0L
+            val held = a.metrics.lora().loraAirtimeHeldByBucket[AirBucket.BRIDGE.name] ?: 0L
             assertTrue("and the refusal left a trace — it is logged per frame, and counted here", held > 0)
         }
 }

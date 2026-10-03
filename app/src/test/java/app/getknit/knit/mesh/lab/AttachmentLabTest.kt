@@ -205,7 +205,7 @@ class AttachmentLabTest {
 
             alice.transport.holdFiles(bob.transport)
             carol.transport.holdFiles(bob.transport)
-            val decided = carol.metrics.snapshot().let { it.framesRelayed + it.framesSuppressed }
+            val decided = carol.metrics.snapshot().let { it.frames.framesRelayed + it.frames.framesSuppressed }
             val photo = Random(8).nextBytes(4_096)
             val hash = sha256Hex(photo)
             alice.setGroupPhoto(groupId, photo)
@@ -217,7 +217,7 @@ class AttachmentLabTest {
             lab.await((decided + 1).toInt()) {
                 carol.metrics
                     .snapshot()
-                    .let { it.framesRelayed + it.framesSuppressed }
+                    .let { it.frames.framesRelayed + it.frames.framesSuppressed }
                     .toInt()
             }
 
@@ -337,7 +337,7 @@ class AttachmentLabTest {
             // Carol's own ask reached Bob too, and Bob handles frames one at a time: it can sit behind the tail of
             // his work on Alice's frame. Answered only after his bytes land, it is a fresh ask he rightly serves —
             // which reads as the push this scenario pins (CI job 5268). Answered now, it finds the bytes arriving.
-            lab.await(1) { if (bob.metrics.snapshot().blobAsksHandled > 0) 1 else 0 }
+            lab.await(1) { if (bob.metrics.files().blobAsksHandled > 0) 1 else 0 }
             alice.transport.release(carol.transport) // Alice's copy of the frame lands on Carol, behind Bob's relay of it
 
             // The 60 s re-offer, for the link that is not busy: Bob re-arms from the database and re-asks each

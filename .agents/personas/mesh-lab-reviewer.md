@@ -72,7 +72,9 @@ Check each of these shapes explicitly — they are the whole history of the lab'
    held frames filtered out at `release` with no re-link before the oracle.
 6. **Topology changes.** A bare `delay` / `Thread.sleep` used as synchronization (flag it always — a delay is
    never an event); links brought up one at a time for a multi-hop topology (`linkAll`); `unlink` → send →
-   `link` without awaiting the carrier's relay decisions (`framesRelayed`); a transport disconnected directly
+   `link` that counts the carrier's relays since a baseline (`framesRelayed`, a stale-baseline wait) instead of
+   waiting on its store and re-linking with its relays lost (`CustodyQuotaLabTest.awaitCustody` and
+   `linkForCustodyOnly`, `lossy = { it.hops > 0 }`; `testing.md`); a transport disconnected directly
    instead of through `lab.unlink` / `restart` (which await `awaitNeighborsObserved`); a cut the moment
    `awaitAcquainted` is skipped.
 7. **Planes that do not converge custody.** Pages, LoRa and the spool carry no third party's DM-form frames:

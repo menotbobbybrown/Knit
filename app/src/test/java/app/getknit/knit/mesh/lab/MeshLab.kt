@@ -407,8 +407,8 @@ class MeshLab {
 
         stores.forEach { n ->
             val snap = n.metrics.snapshot()
-            assertEquals("${n.name} parked a group seed that never replayed", snap.groupSeedsHeld, snap.groupSeedsReplayed)
-            assertEquals("${n.name} parked a frame for a missing key that never replayed", snap.framesHeld, snap.framesReplayed)
+            assertEquals("${n.name} parked a group seed that never replayed", snap.groups.groupSeedsHeld, snap.groups.groupSeedsReplayed)
+            assertEquals("${n.name} parked a frame for a missing key that never replayed", snap.keys.framesHeld, snap.keys.framesReplayed)
             // A node never pins its own key: its own profile loops back through every peer's custody, and a
             // self row turns every seal-to-a-pinned-peer path on ourselves (the hourly self-addressed frames
             // found in the lab fleet's custody, 2026-09-13). The custody rows are the same bug seen from a carrier.
@@ -1372,12 +1372,12 @@ class LabNode internal constructor(
      * is custodied at origination, so once the basket is done a re-link's exchange carries both.
      */
     suspend fun heal() {
-        val before = metrics.snapshot().healsCompleted
+        val before = metrics.frames().healsCompleted
         manager.heal()
         val done =
             withContext(Dispatchers.Default) {
                 withTimeoutOrNull(MeshLab.AWAIT_MS) {
-                    while (metrics.snapshot().healsCompleted <= before) delay(MeshLab.POLL_MS)
+                    while (metrics.frames().healsCompleted <= before) delay(MeshLab.POLL_MS)
                 }
             } != null
         check(done) { "$name's heal basket never finished (healsCompleted stayed at $before)" }
@@ -1509,7 +1509,7 @@ class LabNode internal constructor(
             .mapValues { it.value.toSet() }
 
     /** How many inbound frames this node refused for [reason] this session. */
-    fun drops(reason: DropReason): Long = metrics.snapshot().dropsByReason[reason] ?: 0L
+    fun drops(reason: DropReason): Long = metrics.frames().dropsByReason[reason] ?: 0L
 
     /** The custody store's live id set, as the digest exchange advertises it. */
     suspend fun custodyIds(): Set<String> = forwardStore.liveIds(now()).toSet()
@@ -1538,17 +1538,20 @@ class LabNode internal constructor(
 
     /** The router counters that explain a frame that never arrived: delivered / relayed / deduped / suppressed. */
     fun metricsLine(): String =
-        metrics.snapshot().let {
-            "  $name: originated=${it.framesOriginated} delivered=${it.framesDelivered} relayed=${it.framesRelayed} " +
-                "deduped=${it.framesDeduped} suppressed=${it.framesSuppressed} drops=${it.dropsByReason} " +
-                "held=${it.framesHeld}/${it.framesReplayed} seedsSent=${it.groupSeedsSent} seedsAdopted=${it.groupSeedsAdopted} " +
-                "seedsHeld=${it.groupSeedsHeld} seedsReplayed=${it.groupSeedsReplayed} keyReq=${it.groupKeyRequestsSent}"
+        metrics.snapshot().let { snap ->
+            val f = snap.frames
+            val k = snap.keys
+            val g = snap.groups
+            "  $name: originated=${f.framesOriginated} delivered=${f.framesDelivered} relayed=${f.framesRelayed} " +
+                "deduped=${f.framesDeduped} suppressed=${f.framesSuppressed} drops=${f.dropsByReason} " +
+                "held=${k.framesHeld}/${k.framesReplayed} seedsSent=${g.groupSeedsSent} seedsAdopted=${g.groupSeedsAdopted} " +
+                "seedsHeld=${g.groupSeedsHeld} seedsReplayed=${g.groupSeedsReplayed} keyReq=${g.groupKeyRequestsSent}"
         } + loraLine()
 
     /** The LoRa plane's counters and the radio's own recent log lines — empty for a node without a board. */
     fun loraLine(): String {
         if (lora == null) return ""
-        val s = metrics.snapshot()
+        val s = metrics.lora()
         val lines =
             loraLog
                 .filter { l -> LORA_LOG_KEYS.any { it in l } && "bridge held" !in l && "offer" !in l }
