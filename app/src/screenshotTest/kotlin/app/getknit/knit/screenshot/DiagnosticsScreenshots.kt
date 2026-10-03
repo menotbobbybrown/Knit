@@ -17,6 +17,7 @@ import app.getknit.knit.ui.diagnostics.MetricsSectionEmptyPreview
 import app.getknit.knit.ui.diagnostics.MetricsSectionPopulatedPreview
 import app.getknit.knit.ui.diagnostics.NodeRowCodedPreview
 import app.getknit.knit.ui.diagnostics.NodeRowDirectPreview
+import app.getknit.knit.ui.diagnostics.NodeRowIndirectPreview
 import app.getknit.knit.ui.diagnostics.NodeRowRelayPreview
 import app.getknit.knit.ui.diagnostics.SelfSectionPreview
 import app.getknit.knit.ui.diagnostics.TransportsSectionAbsentPreview
@@ -89,6 +90,11 @@ fun NodeRowDirect() = NodeRowDirectPreview()
 @ComponentShots
 @Composable
 fun NodeRowCoded() = NodeRowCodedPreview()
+
+@PreviewTest
+@ComponentShots
+@Composable
+fun NodeRowIndirect() = NodeRowIndirectPreview()
 
 @PreviewTest
 @ComponentShots

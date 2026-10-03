@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import app.getknit.knit.ui.profile.AvatarCropDialogPreview
 import app.getknit.knit.ui.profile.OpenToChatRowPreview
 import app.getknit.knit.ui.profile.ProfileDetailsScreenBlockedPreview
+import app.getknit.knit.ui.profile.ProfileDetailsScreenIndirectPreview
 import app.getknit.knit.ui.profile.ProfileDetailsScreenNoKeyPreview
 import app.getknit.knit.ui.profile.ProfileDetailsScreenOnlineVerifiedPreview
 import app.getknit.knit.ui.profile.ProfileDetailsScreenViaRelayPreview
@@ -23,6 +24,11 @@ fun AvatarCropDialog() = AvatarCropDialogPreview()
 @ScreenShots
 @Composable
 fun ProfileDetailsScreenOnlineVerified() = ProfileDetailsScreenOnlineVerifiedPreview()
+
+@PreviewTest
+@ScreenShots
+@Composable
+fun ProfileDetailsScreenIndirect() = ProfileDetailsScreenIndirectPreview()
 
 @PreviewTest
 @ScreenShots
