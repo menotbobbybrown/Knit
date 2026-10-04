@@ -510,8 +510,9 @@ class MeshManager(
                 onOwnProfileTombstoned = { republishProfile(force = true) },
                 onPresenceChanged = ::onSpoolPresenceChanged,
                 blobs = scopeBlobs(),
-                // The same hook a radio pull fires, so NSFW screening, the message rows, and the UI all
-                // run unchanged for a spool-delivered image (§9.5). A neighbor that asked us for these bytes
+                // The same hook a radio pull fires, after the same screening ingest (`scopeBlobs().save`), so
+                // NSFW screening, the message rows, and the UI all run unchanged for a spool-delivered image
+                // (§9.5). A neighbor that asked us for these bytes
                 // while we lacked them asks again on its own tick and is served then (ADR 2026-09.4tx5).
                 onAttachmentObtained = { hash -> pipeline.onObtained(hash) },
                 deferAttachment = attachmentDefer::defer,
@@ -1541,11 +1542,13 @@ class MeshManager(
 
     /**
      * The Internet plane's view of the local blob store (spec §9.5). Content-addressed and
-     * write-once, so `save` is the same insert the radio path performs — a re-arrival is a no-op at
-     * the DAO's `OnConflictStrategy.IGNORE`, and GC still bounds it through the ordinary references.
+     * write-once, so `save` is the same ingest the radio path performs — the row's mime over the fetcher's
+     * hint, then the receive-side screen, so a group photo or an avatar the spool brought carries a verdict
+     * before the obtained hook reads it (#109). A re-arrival is a no-op at the DAO's
+     * `OnConflictStrategy.IGNORE`, and GC still bounds it through the ordinary references.
      *
-     * `internal` rather than private only so `MeshManagerTest` can pin the mime-resolution rule in
-     * `save` directly; nothing outside this file constructs one.
+     * `internal` rather than private only so `MeshManagerTest` can pin `save` and `refused` directly;
+     * nothing outside this file constructs one.
      */
     internal fun scopeBlobs(): ScopeBlobs =
         object : ScopeBlobs {
@@ -1553,15 +1556,24 @@ class MeshManager(
 
             override suspend fun bytes(aHash: String): ByteArray? = blobs.bytes(aHash)
 
-            // [mime] is only the fetcher's hint, and since ADR 035 a sealed frame no longer carries one — so
-            // prefer what our own decrypted row says this hash is, and fall back to the hint (an old peer's
-            // cleartext mime, or ScopeSync's image/jpeg default) only when no row names it.
+            // [mime] is only the fetcher's hint (since ADR 035 a sealed frame carries none); `ingest` prefers
+            // what our own decrypted row says, and screens the bytes exactly as a radio pull would.
             override suspend fun save(
                 aHash: String,
                 mime: String,
                 bytes: ByteArray,
-            ) = blobs.insert(aHash, messages.attachmentMimeForHash(aHash) ?: mime, bytes)
+            ) = blobStore.ingest(aHash, mime, bytes)
+
+            override suspend fun refused(aHash: String): Boolean = refusedImage(aHash)
         }
+
+    /**
+     * Whether screening refused [hash] while content filtering is on — a photo whose bytes were dropped and
+     * whose verdict was kept so that nothing fetches it again (ADR 2026-09.nxcq). Read by both re-fetch paths:
+     * [rewantMissingBlobs] on the radios and the spool's attachment pass through [scopeBlobs].
+     */
+    private suspend fun refusedImage(hash: String): Boolean =
+        settings.contentFilteringEnabled.first() && imageScreening.isImageFlagged(hash)
 
     /**
      * The scope table's group half: every group we hold that has a root, paired with the founding roster
@@ -2233,11 +2245,7 @@ class MeshManager(
         // A group's decided photo not shown yet (ADR 2026-09.nxcq): the row is the durable want, so a pull lost
         // to a restart or the fetch TTL comes back here and not only on the group's next frame. A photo
         // screening refused keeps its verdict and is never asked for again while filtering is on.
-        val photos = groups.photoHashesNeedingFetch()
-        if (photos.isNotEmpty()) {
-            val filtering = settings.contentFilteringEnabled.first()
-            photos.forEach { if (!(filtering && imageScreening.isImageFlagged(it))) blobExchange.want(it) }
-        }
+        groups.photoHashesNeedingFetch().forEach { if (!refusedImage(it)) blobExchange.want(it) }
     }
 
     /** Periodically reclaims expired carried DMs, bounding the forward store between heartbeat sweeps. */

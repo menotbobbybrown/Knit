@@ -38,11 +38,19 @@ interface ScopeBlobs {
 
     suspend fun bytes(aHash: String): ByteArray?
 
+    /** Stores bytes already checked against [aHash], and screens them exactly as a radio pull does (#109). */
     suspend fun save(
         aHash: String,
         mime: String,
         bytes: ByteArray,
     )
+
+    /**
+     * Whether this device's own screening refused [aHash] (content filtering on, verdict explicit), so its
+     * bytes were dropped on purpose and fetching them again would only drop them again. The default refuses
+     * nothing.
+     */
+    suspend fun refused(aHash: String): Boolean = false
 }
 
 /** Opens WebSocket sessions to spools. The one seam the OkHttp adapter implements. */
@@ -195,8 +203,9 @@ class ScopeSync(
     // The local blob store, for attachments (§4.5/§9.5). Null switches the attachment half off
     // entirely — the frame plane is unaffected, which is what keeps this additive.
     private val blobs: ScopeBlobs? = null,
-    // Fired once an attachment's bytes are in hand, so screening, the message row and the UI run the
-    // same path a radio pull takes. `InboundPipeline::onObtained` in the app.
+    // Fired once an attachment's bytes are in hand and [ScopeBlobs.save] has screened them, so the adopt
+    // checks, the message row and the UI run the same path a radio pull takes. `InboundPipeline::onObtained`
+    // in the app.
     private val onAttachmentObtained: suspend (String) -> Unit = {},
     // Whether the radios are still carrying an attachment we hold, so its bytes need not cross the
     // Internet this round (§9.5). A deferral, never a veto — see [AttachmentDeferPolicy]. The default
@@ -419,6 +428,17 @@ class ScopeSync(
         val gone: Set<String>,
         val accepted: Int,
     )
+
+    /** An attachment a round passed by without a round trip, and how much of a later look it still owes. */
+    private enum class LocalPass(
+        val owed: Int,
+    ) {
+        /** Our own screening refused it (#109): settled, owed nothing. */
+        REFUSED(0),
+
+        /** The radios still carry it (§9.5's push-half deferral): owed a look once that lapses. */
+        DEFERRED(1),
+    }
 
     /**
      * One spool: its connection, its per-scope digest anchors, and its own invalid set — §9.3 is
@@ -1324,13 +1344,9 @@ class ScopeSync(
                     continue
                 }
                 val mine = blobStore.has(ref.aHash)
-                // Deferring *before* the `ahave` is what makes the gate free: an attachment the radios
-                // are still carrying costs no round trip at all this round, not merely no chunks. A
-                // deferral also spends no round-trip budget, so it can never starve an attachment that
-                // does need pushing.
-                if (mine && deferAttachment(scope, ref)) {
-                    metrics.onSpoolAttachmentDeferred()
-                    pending++
+                val passed = passLocally(scope, ref, mine, blobStore)
+                if (passed != null) {
+                    pending += passed.owed
                 } else {
                     handled++
                     val aid = ScopeCrypto.attachmentId(scope.keys, scope.id, aHashBytes)
@@ -1349,6 +1365,39 @@ class ScopeSync(
             // than the tick's, and only for this scope. A settled scope schedules nothing.
             if (pending > 0) scheduleAttachmentRetry(scope)
         }
+
+        /**
+         * Whether a round can pass [ref] by without a round trip — decided *before* the `ahave`, which is what
+         * makes both gates free: no round trip at all this round, not merely no chunks, and none of the
+         * round-trip budget, so neither can starve an attachment that does need one. Null when it needs one.
+         *
+         * - **Refused** (#109): a photo our own screening refused and dropped is not fetched back only to be
+         *   dropped again (the radios skip it the same way). Settled like a fetched one, so it leaves the scan
+         *   window until the timed recheck asks again.
+         * - **Deferred**: the radios are still carrying an attachment we hold, so its push waits (§9.5).
+         */
+        private suspend fun passLocally(
+            scope: Scope,
+            ref: ScopeAttachments.Ref,
+            mine: Boolean,
+            blobStore: ScopeBlobs,
+        ): LocalPass? =
+            when {
+                !mine && blobStore.refused(ref.aHash) -> {
+                    metrics.onSpoolAttachmentRefused()
+                    settleAttachment(scope, ref.aHash)
+                    LocalPass.REFUSED
+                }
+
+                mine && deferAttachment(scope, ref) -> {
+                    metrics.onSpoolAttachmentDeferred()
+                    LocalPass.DEFERRED
+                }
+
+                else -> {
+                    null
+                }
+            }
 
         /**
          * The attachments a round need not ask about: settled against this connection and, unless this is a

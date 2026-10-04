@@ -1247,23 +1247,34 @@ class MeshManagerTest {
         }
 
     @Test
-    fun theSpoolFetcherStoresAnAttachmentUnderTheMimeOurOwnDecryptedRowNames() =
+    fun theSpoolFetcherSavesThroughTheSameScreeningIngestAsARadioPull() =
         runTest(UnconfinedTestDispatcher()) {
-            // Since ADR 035 a sealed frame names no mime, so ScopeSync hands this seam only its §9.5 default.
-            // The row — written from the *sealed* MessageContent — is what actually knows the type, and a
-            // voice note stored as image/jpeg would render as a broken photo instead of a waveform.
+            // #109: a bare insert here left a spool-pulled group photo or avatar with no verdict. The mime rule
+            // and the screen both live in MeshBlobStore.ingest now (pinned in MeshBlobStoreTest).
             val rig = Rig(backgroundScope)
+            val bytes = "group-photo-bytes".toByteArray()
+
+            rig.manager.scopeBlobs().save("group-photo-hash", "image/jpeg", bytes)
+
+            coVerify(exactly = 1) { rig.blobStore.ingest("group-photo-hash", "image/jpeg", bytes) }
+            coVerify(exactly = 0) { rig.blobs.insert(any(), any(), any()) }
+        }
+
+    @Test
+    fun theSpoolSkipsAPhotoScreeningRefusedOnlyWhileContentFilteringIsOn() =
+        runTest(UnconfinedTestDispatcher()) {
+            // The radios' re-want skips it the same way (rewantMissingBlobs, ADR 2026-09.nxcq).
+            val rig = Rig(backgroundScope)
+            val filtering = MutableStateFlow(true)
+            coEvery { rig.settings.contentFilteringEnabled } returns filtering
+            coEvery { rig.imageScreening.isImageFlagged("explicit") } returns true
+            coEvery { rig.imageScreening.isImageFlagged("fine") } returns false
             val store = rig.manager.scopeBlobs()
-            val bytes = "sealed-attachment-bytes".toByteArray()
-            coEvery { rig.messages.attachmentMimeForHash("voice-ct-hash") } returns VoiceAudio.MIME
-            coEvery { rig.messages.attachmentMimeForHash("group-photo-hash") } returns null
 
-            store.save("voice-ct-hash", "image/jpeg", bytes)
-            store.save("group-photo-hash", "image/jpeg", bytes)
-
-            coVerify { rig.blobs.insert("voice-ct-hash", VoiceAudio.MIME, bytes) }
-            // No row names a group photo or an avatar, so the fetcher's default still stands — unchanged.
-            coVerify { rig.blobs.insert("group-photo-hash", "image/jpeg", bytes) }
+            assertTrue(store.refused("explicit"))
+            assertFalse(store.refused("fine"))
+            filtering.value = false
+            assertFalse("filtering off shows a flagged image, so it is fetched", store.refused("explicit"))
         }
 
     // --- reply + mentions ride the frame and are persisted ---

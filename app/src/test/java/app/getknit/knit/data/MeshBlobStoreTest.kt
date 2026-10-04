@@ -9,6 +9,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -16,9 +17,9 @@ import org.junit.rules.TemporaryFolder
 import java.io.File
 
 /**
- * Net-new coverage for [MeshBlobStore.saveIncoming] — the receive-side ingest that is the **sole** NSFW
- * screen for every plaintext blob the mesh pulls (a relayed avatar, a group photo, a Nearby-room
- * attachment). Its screening skip used to read the serving peer's `LinkFraming.FileHeaderWire.mime`, which
+ * Net-new coverage for [MeshBlobStore.saveIncoming] and [MeshBlobStore.ingest] — the receive-side ingest that
+ * is the **sole** NSFW screen for every plaintext blob the mesh or the spool pulls (a relayed avatar, a group
+ * photo, a Nearby-room attachment). Its screening skip used to read the serving peer's `LinkFraming.FileHeaderWire.mime`, which
  * `BlobExchange.onRequest` lets any neighbour choose, so a hostile holder could declare `audio/aac` and
  * turn screening off for its own blob (knit/knit-next#30). These tests pin the replacement rule: the mime
  * and the E2E key come from **our own** message row, and the wire value decides nothing.
@@ -196,5 +197,88 @@ class MeshBlobStoreTest {
 
             coVerify(exactly = 1) { imageScreening.screenImage(hash, bytes) }
             coVerify(exactly = 0) { imageScreening.screenAttachment(any(), any(), any(), any()) }
+        }
+
+    // --- the spool's door: `ingest`, which `MeshManager.scopeBlobs().save` calls with bytes already checked ---
+
+    @Test
+    fun `a group photo or avatar the spool fetched is screened before the obtained hook runs`() =
+        runTest {
+            // #109: the spool used to store these with a bare insert, so the adopt checks in
+            // InboundPipeline.onObtained found no verdict and showed an explicit image with filtering on.
+            row(mime = null)
+
+            store().ingest(hash, "image/jpeg", bytes)
+
+            coVerify(exactly = 1) { blobs.insert(hash, "image/jpeg", bytes) }
+            coVerify(exactly = 1) { imageScreening.screenImage(hash, bytes) }
+        }
+
+    @Test
+    fun `a received blob is screened before it is held, so held means screened`() =
+        runTest {
+            // A profile or group frame handled on another coroutine reads "held" as "has a verdict": with the
+            // insert first, one landing in between adopted an avatar or showed a photo the screen then refused.
+            row(mime = null)
+            coEvery { imageScreening.screenImage(hash, bytes) } answers {
+                assertFalse("the verdict is written before the bytes are held", hash in stored)
+            }
+
+            store().ingest(hash, "image/jpeg", bytes)
+
+            coVerify(exactly = 1) { imageScreening.screenImage(hash, bytes) }
+            assertTrue(hash in stored)
+        }
+
+    @Test
+    fun `a blob reads as storing while it is screened, and not once it is held`() =
+        runTest {
+            // The re-ask reads this (BlobExchange): past the link's end a blob is no longer arriving, and with the
+            // screen ahead of the insert it is not held either until the classifier answers.
+            row(mime = null)
+            val store = store()
+            var seenWhileScreening = false
+            coEvery { imageScreening.screenImage(hash, bytes) } answers { seenWhileScreening = store.storing(hash) }
+
+            store.saveIncoming(hash, "image/jpeg", staged().absolutePath)
+
+            assertTrue("storing while the screen runs", seenWhileScreening)
+            assertFalse("not storing once held", store.storing(hash))
+        }
+
+    @Test
+    fun `a blob that fails its hash is not left reading as storing`() =
+        runTest {
+            row(mime = null)
+            val store = store()
+
+            assertNull(store.saveIncoming(hash, "image/jpeg", staged("different-bytes-entirely".toByteArray()).absolutePath))
+
+            assertFalse(store.storing(hash))
+        }
+
+    @Test
+    fun `a spool-fetched attachment is stored under the mime our own decrypted row names`() =
+        runTest {
+            // Since ADR 035 a sealed frame carries no mime, so the fetcher's hint is its image/jpeg default —
+            // and a voice note stored as image/jpeg would render as a broken photo instead of a waveform.
+            row(mime = "audio/aac", key = "YmFzZTY0LWtleQ==")
+
+            store().ingest(hash, "image/jpeg", bytes)
+
+            coVerify(exactly = 1) { blobs.insert(hash, "audio/aac", bytes) }
+            // Sealed non-image: ciphertext here, screened after decryption in InboundPipeline.onObtained.
+            coVerify(exactly = 0) { imageScreening.screenImage(any(), any()) }
+        }
+
+    @Test
+    fun `a room card the spool fetched is screened as a card`() =
+        runTest {
+            row(LinkPreviewBlob.MIME, key = null)
+
+            store().ingest(hash, "image/jpeg", bytes)
+
+            coVerify(exactly = 1) { imageScreening.screenAttachment(hash, bytes, LinkPreviewBlob.MIME, isRoom = true) }
+            coVerify(exactly = 0) { imageScreening.screenImage(any(), any()) }
         }
 }

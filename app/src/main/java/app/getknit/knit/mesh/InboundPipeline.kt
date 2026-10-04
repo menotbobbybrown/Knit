@@ -1271,7 +1271,8 @@ class InboundPipeline(
      * the sender's profile **version** (the same number a cleartext profile frame carries as its
      * `sentAt`, which is why the two paths order against each other and a custody re-serve of a stale
      * ctl cannot undo a newer update), and [resolveAvatarHash]'s rule that a stored avatar hash means
-     * "the bytes are present locally", so a hash is never adopted before its blob lands.
+     * "the bytes are present locally and screening let them through" ([avatarAdoptable]), so a hash is never
+     * adopted before its blob lands, nor ever while content filtering refuses it.
      */
     private suspend fun applySealedProfile(
         env: RelayEnvelope,
@@ -1289,6 +1290,7 @@ class InboundPipeline(
         // ancient-but-valid — an unversioned update cannot be ordered, so it must not be applied.
         if (version <= 0L || version < existing.updatedAt) return null
         val advertised = payload.avatarHash
+        // Held decides the pull (a held blob is never asked for again); adoptable decides the row.
         val haveAvatar = advertised != null && blobStore.has(advertised)
         val name = payload.name.take(TextLimits.DISPLAY_NAME)
         peers.upsert(
@@ -1296,7 +1298,7 @@ class InboundPipeline(
                 // Clamp inbound, as the cleartext path does: our own cap bounds only what we originate.
                 name = name,
                 status = payload.status.take(TextLimits.STATUS),
-                avatarHash = resolveAvatarHash(advertised, haveAvatar, existing.avatarHash),
+                avatarHash = resolveAvatarHash(advertised, avatarAdoptable(advertised), existing.avatarHash),
                 updatedAt = version,
                 // The whole presentation set moves together (see ProfilePayload): a field this path did not
                 // copy would be reverted by every sealed update after the cleartext frame that set it.
@@ -2355,8 +2357,11 @@ class InboundPipeline(
         val decided = if (takePhoto) incomingPhoto else keepPhoto
         val clock = if (takePhoto) incomingPhotoClock else keepPhotoClock
         val pending = decided?.takeIf { it != shownPhoto }
+        // Held first, then the verdict: the store screens before it inserts, so bytes seen held always have
+        // their verdict by now — the opposite order could read "no verdict" just before both land (#109).
+        val held = pending != null && blobStore.has(pending)
         val refused = pending != null && filtering && imageScreening.isImageFlagged(pending)
-        val haveBytes = pending != null && !refused && blobStore.has(pending)
+        val haveBytes = held && !refused
         val shown = if (haveBytes) pending else shownPhoto
         return PhotoDecision(
             hash = decided,
@@ -2423,16 +2428,16 @@ class InboundPipeline(
      * A pulled blob just landed: every group that decided on it as its photo and does not show it yet shows
      * it now — the rows say which ([GroupRepository.awaitingPhoto]), so a pull re-armed after a restart lands
      * as well as one this process asked for — unless, with content filtering on, the screen in
-     * [MeshBlobStore.saveIncoming] (which a group photo, naming no message row, can never skip) flagged it
-     * explicit: then its bytes go and its verdict stays, and the previous photo keeps showing. Each row is
-     * re-read in its own transaction and shown only while it still decides on [hash], so a newer photo decided
-     * meanwhile wins. A no-op for blobs no group wants.
+     * [MeshBlobStore.ingest] (which a group photo, naming no message row, can never skip, whether a radio pull or
+     * a spool fetch brought it) flagged it explicit: then its bytes go and its verdict stays, and the previous
+     * photo keeps showing. Each row is re-read in its own transaction and shown only while it still decides on
+     * [hash], so a newer photo decided meanwhile wins. A no-op for blobs no group wants.
      */
     private suspend fun settleArrivedGroupPhoto(hash: String) {
         val waiting = groups.awaitingPhoto(hash)
         if (waiting.isEmpty()) return
         // Mirror the avatar gate: the setting gates receive-side hiding, so off -> show it anyway.
-        if (settings.contentFilteringEnabled.first() && imageScreening.isImageFlagged(hash)) {
+        if (refusedImage(hash)) {
             blobs.dropRefusedGroupPhoto(hash)
             return
         }
@@ -3116,8 +3121,9 @@ class InboundPipeline(
         val pinned = existing?.pubKey
         if (pinned != null && pinned != pubKey) return StoredProfile.PinRefused
         val advertised = content.avatarHash
-        // The stored avatarHash means "bytes are present locally": adopt the advertised hash only once
-        // we hold its blob, otherwise keep the current avatar (if any) until the new one is fetched.
+        // The stored avatarHash means "bytes are present locally" (and screened through — [avatarAdoptable]):
+        // adopt the advertised hash only then, otherwise keep the current avatar (if any) until the new one is
+        // fetched. [haveAvatar] — held at all — is what decides the pull.
         val haveAvatar = advertised != null && blobStore.has(advertised)
         // The pinned key is guaranteed unchanged here (a differing key was refused above), so carrying
         // the prior [verified] state through the upsert is safe.
@@ -3135,7 +3141,7 @@ class InboundPipeline(
                     if (stalePresentation) {
                         base.avatarHash
                     } else {
-                        resolveAvatarHash(advertised, haveAvatar, existing?.avatarHash)
+                        resolveAvatarHash(advertised, avatarAdoptable(advertised), existing?.avatarHash)
                     },
                 protoVersion = content.protoVersion ?: existing?.protoVersion,
                 capabilities = content.capabilities ?: existing?.capabilities,
@@ -3225,22 +3231,41 @@ class InboundPipeline(
     /**
      * The avatar hash to store for a peer from an inbound profile. [advertised] is what the profile
      * carries (null = the peer has no avatar):
-     *  - adopt [advertised] once its blob is local ([haveAvatar]);
+     *  - adopt [advertised] once its blob is local and screening let it through ([adoptable], from
+     *    [avatarAdoptable]);
      *  - null when the peer advertises no avatar — an explicit removal, since a set avatar always rides as
      *    a non-null hash and [handleProfile]'s last-writer-wins gate guarantees this profile is the newest
      *    state, so the clear propagates instead of clinging to the old photo;
-     *  - otherwise keep [current] until the advertised (but not-yet-fetched) blob arrives.
+     *  - otherwise keep [current] until the advertised (but not-yet-fetched) blob arrives, or for good while
+     *    content filtering refuses it.
      */
     private fun resolveAvatarHash(
         advertised: String?,
-        haveAvatar: Boolean,
+        adoptable: Boolean,
         current: String?,
     ): String? =
         when {
-            haveAvatar -> advertised
+            adoptable -> advertised
             advertised == null -> null
             else -> current
         }
+
+    /**
+     * Whether a profile may point its peer at the advertised avatar [hash] now: the bytes are held and, with
+     * content filtering on, screening has not refused them — the avatar half of [groupPhotoDecision]'s rule.
+     * Held alone is not enough (#109). A refused avatar's bytes can stay, pinned in custody by the sealed
+     * profile whose cleartext names them, so [adoptAdvertisedAvatar]'s refusal does not delete them; and the
+     * spool fetches from custody, so the bytes can land, screened, before any profile is applied and with no
+     * owner for [adoptAdvertisedAvatar] to refuse. Either way the next profile carrying the hash finds it held.
+     */
+    private suspend fun avatarAdoptable(hash: String?): Boolean = hash != null && blobStore.has(hash) && !refusedImage(hash)
+
+    /**
+     * Whether screening refused [hash] while content filtering is on. The setting gates receive-side hiding
+     * only — the scan runs and caches its verdict regardless — so with it off a flagged image is shown.
+     */
+    private suspend fun refusedImage(hash: String): Boolean =
+        settings.contentFilteringEnabled.first() && imageScreening.isImageFlagged(hash)
 
     /**
      * When an inbound profile cleared a peer's avatar (null [advertised] over a non-null [previous] hash),
@@ -3265,11 +3290,13 @@ class InboundPipeline(
     private suspend fun adoptAdvertisedAvatar(hash: String) {
         val owners = advertisedAvatars.entries.filter { it.value == hash }.map { it.key }
         if (owners.isEmpty()) return
-        // A pulled avatar is screened in MeshBlobStore.saveIncoming — it holds no message row, so nothing
-        // local can claim it is audio and the screen always runs (knit/knit-next#30 closed the header-mime
-        // skip that let a serving peer suppress it). With content filtering on, don't adopt it if flagged
-        // explicit (the setting gates receive-side hiding, so off → adopt anyway).
-        if (settings.contentFilteringEnabled.first() && imageScreening.isImageFlagged(hash)) {
+        // A pulled avatar is screened in MeshBlobStore.ingest, on either plane — it holds no message row, so
+        // nothing local can claim it is audio and the screen always runs (knit/knit-next#30 closed the
+        // header-mime skip that let a serving peer suppress it; #109 the spool's bare insert). With content
+        // filtering on, don't adopt it if flagged explicit (the setting gates receive-side hiding, so off →
+        // adopt anyway). The bytes may stay — the sealed profile that named them pins them in custody — which
+        // is why the profile writers ask [avatarAdoptable], not only whether the blob is held.
+        if (refusedImage(hash)) {
             owners.forEach { advertisedAvatars.remove(it) }
             blobs.deleteIfUnreferenced(hash)
             return
@@ -3319,13 +3346,15 @@ class InboundPipeline(
             File(srcPath).delete()
             return
         }
+        // Screened before it is stored, as MeshBlobStore.ingest does: a profile writer that finds the bytes
+        // held must find their verdict too, or it adopts an avatar this push is about to refuse.
+        imageScreening.screenImage(hash, bytes)
         blobs.insert(hash, mime, bytes)
         File(srcPath).delete()
         advertisedAvatars.remove(nodeId) // pushed directly; no need to also pull it
-        imageScreening.screenImage(hash, bytes)
         // With content filtering on, don't adopt an explicit avatar: leave the peer on its monogram
         // fallback and drop the blob (the setting gates receive-side hiding, so off → adopt anyway).
-        if (settings.contentFilteringEnabled.first() && imageScreening.isImageFlagged(hash)) {
+        if (refusedImage(hash)) {
             blobs.deleteIfUnreferenced(hash)
             return
         }
@@ -3335,11 +3364,11 @@ class InboundPipeline(
     /**
      * A blob just landed via [BlobExchange]. If it's an E2E attachment we hold the key for (stored when
      * the message was delivered, which is what triggered the pull), screen its *decrypted* bytes. The
-     * screen in [MeshBlobStore.saveIncoming] only ever sees the stored ciphertext for an encrypted
+     * screen in [MeshBlobStore.ingest] only ever sees the stored ciphertext for an encrypted
      * attachment — it can't decode it — so this is where receive-side image moderation actually runs for
      * DM/group attachments. A no-op for avatars and for relayed blobs we have no key for.
      *
-     * The key is also what tells [MeshBlobStore.saveIncoming] a voice note is genuinely sealed and so worth
+     * The key is also what tells [MeshBlobStore.ingest] a voice note is genuinely sealed and so worth
      * skipping; a key-less blob is plaintext and is screened there whatever mime claims it is.
      */
     private suspend fun screenObtainedAttachment(hash: String) {
@@ -3351,7 +3380,7 @@ class InboundPipeline(
      * key the chat UI's flagged set uses, so a flagged attachment hides behind a tap-to-reveal. With a base64
      * [key] the stored blob is ciphertext: it is decrypted here and the plaintext screened by [mime] (a picture
      * as an image; a link-preview card as a card, picture and text). Without a key only one shape needs this
-     * path: a **room card** whose blob was relayed before its row arrived, which [MeshBlobStore.saveIncoming]
+     * path: a **room card** whose blob was relayed before its row arrived, which [MeshBlobStore.ingest]
      * could only screen as an image (a no-op on a container) — a plaintext image was screened there on arrival
      * and is left alone. A no-op when the blob isn't stored yet or decryption fails; the screening service is
      * idempotent per hash, so a repeat call is harmless, and it always caches a verdict (the content-filtering

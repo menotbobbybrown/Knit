@@ -3777,6 +3777,68 @@ class InboundPipelineTest {
         }
 
     @Test
+    fun aHeldAvatarScreeningRefusedIsNotAdoptedByTheNextProfile() =
+        runTest {
+            // #109: a refused avatar's bytes can stay held — the sealed profile that named them pins them in
+            // custody, and the spool fetches from custody before any owner is registered — so "held" alone
+            // must not adopt. Filtering gates only the hiding: off, the same profile adopts it.
+            val rig = Rig(backgroundScope)
+            val alice = party()
+            coEvery { rig.blobStore.has("av3") } returns true
+            coEvery { rig.imageScreening.isImageFlagged("av3") } returns true
+
+            rig.deliver(alice, rig.profile(alice, avatarHash = "av3", sentAt = 5L))
+
+            assertNull("a held but refused avatar stays off the row", rig.peerMap[alice.nodeId]?.avatarHash)
+            coVerify(exactly = 0) { rig.blobExchange.want("av3") }
+
+            rig.settings.contentFilteringEnabled.value = false
+            rig.deliver(alice, rig.profile(alice, avatarHash = "av3", sentAt = 6L))
+
+            assertEquals("av3", rig.peerMap[alice.nodeId]?.avatarHash)
+        }
+
+    @Test
+    fun aSealedProfileDoesNotAdoptAHeldAvatarScreeningRefused() =
+        runTest {
+            // The sealed writer shares the rule: a CTL_PROFILE whose avatar the spool already fetched, screened
+            // and refused keeps the current avatar, and never re-wants bytes it holds.
+            val rig = Rig(backgroundScope)
+            val alice = party()
+            rig.deliver(alice, rig.profileWithPrekey(alice, sentAt = 10L, prekey = null, version = 10L))
+            val author = V2Author(alice, rig)
+            coEvery { rig.blobStore.has("av4") } returns true
+            coEvery { rig.imageScreening.isImageFlagged("av4") } returns true
+
+            rig.deliver(
+                alice,
+                author.dm(
+                    "ctl-av-1",
+                    "",
+                    ctl = MessageContent.CTL_PROFILE,
+                    pr = ProfilePayload(name = "Ann", status = "", version = 20L, avatarHash = "av4"),
+                ),
+            )
+
+            assertEquals("Ann", rig.peerMap[alice.nodeId]?.name)
+            assertNull("a held but refused avatar stays off the row", rig.peerMap[alice.nodeId]?.avatarHash)
+            coVerify(exactly = 0) { rig.blobExchange.want("av4") }
+
+            rig.settings.contentFilteringEnabled.value = false
+            rig.deliver(
+                alice,
+                author.dm(
+                    "ctl-av-2",
+                    "",
+                    ctl = MessageContent.CTL_PROFILE,
+                    pr = ProfilePayload(name = "Ann", status = "", version = 30L, avatarHash = "av4"),
+                ),
+            )
+
+            assertEquals("av4", rig.peerMap[alice.nodeId]?.avatarHash)
+        }
+
+    @Test
     fun clearingAnAvatarReclaimsTheOldBlob() =
         runTest {
             val rig = Rig(backgroundScope)

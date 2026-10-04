@@ -78,11 +78,11 @@ class BlobExchange(
 
     /**
      * Requests [hash] from every direct neighbor, unless we already hold it, are already fetching it, or its
-     * bytes are streaming in on a link right now. An arriving hash is not even marked: if the transfer dies
+     * bytes are streaming in on a link or going into the store right now. An arriving hash is not even marked: if the transfer dies
      * the database re-arms it on the next tick (`rewantMissingBlobs`), and the memo is never the source.
      */
     suspend fun want(hash: String) {
-        if (store.has(hash) || hash in transport.arrivingFiles()) return
+        if (store.has(hash) || store.storing(hash) || hash in transport.arrivingFiles()) return
         if (!recordFetch(hash, now())) return // already fetching — don't re-broadcast (onNeighborAdded re-asks)
         val req = blobRequest(selfId(), hash)
         transport.neighbors.value.forEach { transport.send(req, it) } // outside the lock
@@ -106,6 +106,8 @@ class BlobExchange(
         // bytes we already hold. Asking the store here is the same guard [want] applies before it broadcasts.
         // A hash whose bytes are on the way stays in the memo (the transfer may still die) but is not asked
         // for: the re-ask against a slow BLE transfer is what bought a second copy from every holder (#79).
+        // "On the way" includes the store's own last step: past the link's end, a blob is screened before it is
+        // held (#109), and a tick in that classification would otherwise ask for it again.
         val arriving = transport.arrivingFiles()
         val missing =
             snapshotFetching()
@@ -116,7 +118,7 @@ class BlobExchange(
                             partials.drop(hash) // obtained off-mesh: nothing left to resume
                         }
                     }
-                }.filterNot { it in arriving }
+                }.filterNot { it in arriving || store.storing(it) }
         if (missing.isEmpty() || transport.fileArrivingFrom(peer.nodeId)) return
         val me = selfId()
         missing.forEach { hash -> transport.send(blobRequest(me, hash), peer) }
@@ -208,7 +210,7 @@ class BlobExchange(
     private suspend fun reaskFromZero(hash: String) {
         onSpliceRefused()
         if (!partials.drop(hash)) return
-        if (store.has(hash) || hash in transport.arrivingFiles()) return
+        if (store.has(hash) || store.storing(hash) || hash in transport.arrivingFiles()) return
         recordFetch(hash, now())
         val req = blobRequest(selfId(), hash)
         transport.neighbors.value.forEach { transport.send(req, it) }

@@ -446,7 +446,8 @@ class MeshLab {
                 nodes.map { n -> "  ${n.name}: missing ${ids.filterNot { n.attachmentHeld(conversation(n), it) }}" }.joinToString("\n"),
             held,
         )
-        nodes.forEach { n ->
+        // A lab that allows every picture never flags one; a node told to mind them all flags by design (#109).
+        nodes.filterNot { it.picturesExplicit }.forEach { n ->
             ids.forEach { id -> assertTrue("${n.name} flagged the attachment on $id", !n.attachmentFlagged(conversation(n), id)) }
         }
         ids.forEach { id ->
@@ -475,7 +476,7 @@ class MeshLab {
         timeoutMs: Long,
     ) {
         val pairs = nodes.flatMap { a -> nodes.filter { it !== a }.map { b -> a to b } }
-        val presented = tryAwait(1, timeoutMs) { if (pairs.all { (a, b) -> a.presentationOf(b) == b.ownPresentation() }) 1 else 0 }
+        val presented = tryAwait(1, timeoutMs) { if (pairs.all { (a, b) -> presentsAsItIs(a, b) }) 1 else 0 }
         assertTrue(
             "profiles did not converge across ${nodes.map { it.name }} within ${timeoutMs}ms:\n" +
                 pairs
@@ -483,6 +484,21 @@ class MeshLab {
                     .joinToString("\n") + "\n${report(nodes)}",
             presented,
         )
+    }
+
+    /**
+     * Whether [a] presents [b] as [b] presents itself. The one difference allowed is an avatar [a]'s screening
+     * refused with content filtering on: [a] must not show it, and keeps whatever it showed before (#109).
+     */
+    private suspend fun presentsAsItIs(
+        a: LabNode,
+        b: LabNode,
+    ): Boolean {
+        val held = a.presentationOf(b) ?: return false
+        val own = b.ownPresentation()
+        val avatar = own.avatarHash
+        val refused = avatar != null && a.settings.contentFilteringEnabled.first() && a.imageFlagged(avatar)
+        return if (refused) held.avatarHash != avatar && held.copy(avatarHash = null) == own.copy(avatarHash = null) else held == own
     }
 
     private suspend fun assertSessionsAgree(
@@ -600,6 +616,25 @@ class MeshLab {
         air.lossy = { _, _ -> false }
         // Settled before the scenario reads any baseline: the receipts for those two DMs are frames too.
         assertConverged(listOf(alice, bob), atLeast = 4) { it.dmWith(if (it === alice) bob else alice) }
+    }
+
+    /**
+     * Three nodes on one relay — alice, bob and carol — linked, acquainted and holding DM sessions both ways, so
+     * every DM scope derives. Still linked on return: a scenario parts whichever radios it means to.
+     */
+    internal suspend fun threeOnOneRelay(spool: FakeSpool): Triple<LabNode, LabNode, LabNode> {
+        val alice = node("alice", spool = spool).apply { setDisplayName("Alice") }
+        val bob = node("bob", spool = spool).apply { setDisplayName("Bob") }
+        val carol = node("carol", spool = spool).apply { setDisplayName("Carol") }
+        linkAll(alice to bob, bob to carol, alice to carol)
+        awaitAcquainted(alice, bob, carol)
+        listOf(alice to bob, alice to carol, bob to carol).forEach { (a, b) ->
+            assertTrue(a.sendDm(b, "hello"))
+            await(1) { b.decrypted(b.dmWith(a)).size }
+            assertTrue(b.sendDm(a, "hi"))
+            assertConverged(listOf(a, b), atLeast = 2) { it.dmWith(if (it === a) b else a) }
+        }
+        return Triple(alice, bob, carol)
     }
 
     /** Waits until [node]'s spool has heard from [peer] recently enough for the mesh to route on it. */
@@ -795,6 +830,14 @@ class LabNode internal constructor(
     private val dataStore = PreferenceDataStoreFactory.create(scope = settingsScope) { File(dir, "settings.preferences_pb") }
     val settings = SettingsStore(dataStore)
 
+    /**
+     * Whether this node's image classifier calls every picture it decodes explicit — what the bundled model
+     * says of a picture it minds. Read at each classification, so a scenario can flip it mid-run; kept across
+     * restarts. Content filtering is on by default, so a flagged picture is also a refused one.
+     */
+    @Volatile
+    var picturesExplicit = false
+
     // --- the live stack, rebuilt by boot() ---
 
     /**
@@ -901,12 +944,17 @@ class LabNode internal constructor(
                 maxPerGroup = limits.custodyMaxPerGroup,
                 maxBroadcast = limits.custodyMaxBroadcast,
             )
-        // The leaves with a hardware or UI side. Text allowed, every picture allowed, notifications swallowed.
-        // (A relaxed ImageModerator mock hands back a mocked verdict whose `flagged` reads false by accident;
-        // the explicit answer is what the tflite model would say about a picture it does not mind.)
+        // The leaves with a hardware or UI side. Text allowed, every picture allowed unless [picturesExplicit],
+        // notifications swallowed. (A relaxed ImageModerator mock hands back a mocked verdict whose `flagged`
+        // reads false by accident; the explicit answer is what the tflite model would say about a picture it does
+        // not mind.)
         val allowAll = mockk<ScopedTextModerator> { coEvery { classify(any(), any()) } returns TextVerdict.ALLOWED }
-        val allowPictures = mockk<ImageModerator> { coEvery { classify(any()) } returns ImageVerdict.ALLOWED }
-        val imageScreening = ImageScreeningService(allowPictures, db.blobVerdictDao(), allowAll)
+        val pictures =
+            mockk<ImageModerator> {
+                coEvery { classify(any()) } answers
+                    { if (picturesExplicit) EXPLICIT else ImageVerdict.ALLOWED }
+            }
+        val imageScreening = ImageScreeningService(pictures, db.blobVerdictDao(), allowAll)
         val blobStore = MeshBlobStore(blobs, messages, imageScreening, File(dir, "blobtx"))
         val notifier = mockk<Notifier>(relaxed = true)
         // THE ratchet lock + the transaction that encloses it, shared by both session services (di/MeshModule).
@@ -1688,6 +1736,9 @@ class LabNode internal constructor(
         return blobs.exists(hash)
     }
 
+    /** Whether screening here flagged the blob [hash] — an avatar or a group photo, which no message row names. */
+    suspend fun imageFlagged(hash: String): Boolean = db.blobVerdictDao().find(hash)?.flagged == true
+
     /** The content hash the message's row names (the ciphertext hash for a DM or a group), or null. */
     suspend fun attachmentHash(
         conversationId: String,
@@ -1776,6 +1827,9 @@ class LabNode internal constructor(
     private companion object {
         const val IMAGE_MIME = "image/jpeg"
         const val LORA_LOG_LINES = 24
+
+        /** The classifier's answer to a picture it minds, under [picturesExplicit]. */
+        val EXPLICIT = ImageVerdict(allowed = false, score = 0.99f)
 
         /** The LoRa log lines worth reading on a failure — the radio's own traffic, not the bridge loop's bookkeeping. */
         val LORA_LOG_KEYS = listOf("rx ", "profile-self", "ready", "fastSend", "send:", "far:", "fanout:", "held", "drop", "stale")

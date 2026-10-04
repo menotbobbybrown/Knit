@@ -113,19 +113,26 @@ identical bytes are scanned once across send/receive):
 
   A clean image stages immediately; GIFs are screened on their first frame. The send-side checks above
   always run (they are not gated by the toggle).
-- **Inbound (flag-on-receive):** `MeshBlobStore.saveIncoming()` → `ImageScreeningService.screenImage()`
-  always caches a verdict for a plaintext blob; the chat UI blurs flagged attachments behind tap-to-view
+- **Inbound (flag-on-receive):** `MeshBlobStore.ingest()` → `ImageScreeningService.screenImage()`
+  always caches a verdict for a plaintext blob, whichever plane brought it: a radio pull reaches it through
+  `saveIncoming()`, a spool fetch through `MeshManager.scopeBlobs().save` (#109 — a bare insert there left a
+  spool-pulled group photo or avatar with no verdict). The screen runs **before** the bytes are stored (as does
+  `onAvatarReceived`'s), so "held" always means "screened" to a frame handled on another coroutine. The chat UI blurs flagged attachments behind tap-to-view
   (`AttachmentImage`, `ChatRow.attachmentFlagged`) **only when the content-filtering toggle is on** —
   `ChatViewModel` gates `ChatRow.attachmentFlagged` on `contentFilteringEnabled` (reactive). Bytes are
   stored regardless, so a false positive never drops content. **What "always" rests on:** the decision is
   taken from *our own* state — the message row's mime and key — never from the `LinkFraming.FileHeaderWire`
   the serving peer wrote, which `BlobExchange.onRequest` lets any neighbour choose (knit/knit-next#30).
-- **Avatars:** received avatars are always screened in `saveIncoming` / `MeshManager.onAvatarReceived`;
+- **Avatars:** received avatars are always screened in `ingest` / `InboundPipeline.onAvatarReceived`;
   a flagged avatar is **not adopted** (the peer falls back to its monogram) **when the content-filtering
   toggle is on** — `onAvatarReceived` / `adoptAdvertisedAvatar` gate the reject decision on
   `contentFilteringEnabled`, so with the toggle off the avatar is adopted anyway (an at-arrival decision,
-  not reactive). Applies on both the direct-push and multi-hop pull paths — a pulled avatar names no
-  message row at all, so nothing local can mark it audio and its screen is unconditional. (Own-avatar
+  not reactive). Applies on the direct-push, multi-hop pull and spool paths — a pulled avatar names no
+  message row at all, so nothing local can mark it audio and its screen is unconditional. **Held is not
+  adoptable:** a refused avatar's bytes can stay — the sealed profile whose cleartext names them pins them
+  in custody, and the spool fetches from custody before any profile is applied — so both profile writers
+  adopt a held avatar only when screening has not refused it (`InboundPipeline.avatarAdoptable`, the avatar
+  half of the group photo's decided-vs-shown rule). (Own-avatar
   send-screening is intentionally omitted — every recipient screens what it receives, so an explicit
   own-avatar is dropped on their side when they have filtering on.)
 
@@ -230,7 +237,7 @@ keyed attachment MIME-blind: an image mislabelled as a file still lands with a c
 bubble draws a "may contain sensitive content" line rather than a blur, there being no image to blur.
 
 **The receive-side skip reads local state only, and only for a *sealed non-image*.**
-`MeshBlobStore.saveIncoming` asks `messages.attachmentMimeForHash(hash)` and
+`MeshBlobStore.ingest` (behind both `saveIncoming` and the spool's `scopeBlobs().save`) asks `messages.attachmentMimeForHash(hash)` and
 `messages.attachmentKeyForHash(hash)`, never the `LinkFraming.FileHeaderWire.mime` the serving peer wrote
 — that header is unauthenticated and `BlobExchange.onRequest` serves a blob to any neighbour that asks, so
 gating on it let a hostile server switch screening off for its own blob (knit/knit-next#30). Both halves
@@ -242,7 +249,8 @@ link-preview card, and a card is not skipped but *opened* (§7.1) — and it sta
 skip: a sealed attachment's stored bytes are ciphertext the image decoder cannot read either way, which is
 why the real screen for one happens after decryption in `InboundPipeline.onObtained`. A blob with **no**
 row (a pulled avatar, a group photo, a relayed blob) reads as `null`, is therefore not an image by this
-test, and is screened — the safe default, and the only screen those blobs get.
+test, and is screened — the safe default, and the only screen those blobs get, on the radios and the spool
+alike.
 
 What protects a recipient instead:
 
@@ -293,9 +301,9 @@ Both halves are text or image, so both classifiers apply, and they apply twice:
   verdict, like an image that does not decode; it renders nothing anyway.
 
 Routing is by **our own row's MIME**, never the serving peer's header: a key-less blob whose row names the
-card MIME goes to the card screen in room scope (`MeshBlobStore.saveIncoming`), a sealed one is opened after
+card MIME goes to the card screen in room scope (`MeshBlobStore.ingest`), a sealed one is opened after
 decryption in `InboundPipeline.screenHeldAttachment` in DM scope, and a room card whose blob was relayed
-*before* its row arrived — which `saveIncoming` could only try as an image, a no-op on a container — is
+*before* its row arrived — which `ingest` could only try as an image, a no-op on a container — is
 screened by the same `screenHeldAttachment` when the message names it. A MIME an author claims can
 therefore route a blob *into* the stricter screen, never around one.
 

@@ -56,22 +56,6 @@ class InternetPlaneLabTest {
 
     private fun LabNode.dmThreadWith(other: LabNode): (LabNode) -> String = { if (it === this) dmWith(other) else it.dmWith(this) }
 
-    /** Three nodes on one relay, acquainted and holding DM sessions both ways, so every DM scope derives. */
-    private suspend fun threeOnOneRelay(spool: FakeSpool): Triple<LabNode, LabNode, LabNode> {
-        val alice = lab.node("alice", spool = spool).apply { setDisplayName("Alice") }
-        val bob = lab.node("bob", spool = spool).apply { setDisplayName("Bob") }
-        val carol = lab.node("carol", spool = spool).apply { setDisplayName("Carol") }
-        lab.linkAll(alice to bob, bob to carol, alice to carol)
-        lab.awaitAcquainted(alice, bob, carol)
-        listOf(alice to bob, alice to carol, bob to carol).forEach { (a, b) ->
-            assertTrue(a.sendDm(b, "hello"))
-            lab.await(1) { b.decrypted(b.dmWith(a)).size }
-            assertTrue(b.sendDm(a, "hi"))
-            lab.assertConverged(listOf(a, b), atLeast = 2) { a.dmThreadWith(b)(it) }
-        }
-        return Triple(alice, bob, carol)
-    }
-
     /**
      * The two-island trial ADR 064 still owes: a group the three founded together, then Alice and Bob one
      * island (linked) and Carol the other, all three on one relay. Carol writes across the relay through
@@ -82,7 +66,7 @@ class InternetPlaneLabTest {
     fun twoIslandsShareAGroupThroughOneRelayAndADepartureRotatesTheScope() =
         runBlocking {
             val spool = FakeSpool()
-            val (alice, bob, carol) = threeOnOneRelay(spool)
+            val (alice, bob, carol) = lab.threeOnOneRelay(spool)
             val groupId = alice.createGroup(bob, carol)
             assertTrue(alice.sendGroup(groupId, "founded together"))
             lab.assertConverged(listOf(alice, bob, carol), atLeast = 1) { groupId }
@@ -139,7 +123,7 @@ class InternetPlaneLabTest {
     fun aGroupFoundedAcrossTheRelayReachesTheRelayOnlyMember() =
         runBlocking {
             val spool = FakeSpool()
-            val (alice, bob, carol) = threeOnOneRelay(spool)
+            val (alice, bob, carol) = lab.threeOnOneRelay(spool)
             lab.unlink(alice, carol)
             lab.unlink(bob, carol)
             lab.awaitDmScope(alice, carol)

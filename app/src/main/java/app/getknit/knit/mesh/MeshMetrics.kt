@@ -295,6 +295,7 @@ class MeshMetrics {
     private val spoolAttachPushed = AtomicLong()
     private val spoolAttachPulled = AtomicLong()
     private val spoolAttachDeferred = AtomicLong()
+    private val spoolAttachRefused = AtomicLong()
     private val loraSent = AtomicLong()
     private val loraFragSent = AtomicLong()
     private val loraTranscoded = AtomicLong()
@@ -887,6 +888,14 @@ class MeshMetrics {
         spoolAttachDeferred.incrementAndGet()
     }
 
+    /**
+     * A spool attachment this device's own screening refused (bytes dropped, verdict kept) was not fetched
+     * again (#109). Counted for the same reason as a deferral: a skip and a stuck fetch look alike otherwise.
+     */
+    fun onSpoolAttachmentRefused() {
+        spoolAttachRefused.incrementAndGet()
+    }
+
     /** One frame sent over the LoRa plane (a whole frame, however many fragments it split into). */
     fun onLoraSent() {
         loraSent.incrementAndGet()
@@ -1286,6 +1295,7 @@ class MeshMetrics {
             spoolAttachPushed = spoolAttachPushed.get(),
             spoolAttachPulled = spoolAttachPulled.get(),
             spoolAttachDeferred = spoolAttachDeferred.get(),
+            spoolAttachRefused = spoolAttachRefused.get(),
         )
 
     /** The [Snapshot.Lora] counters alone, read now. */
@@ -1504,6 +1514,7 @@ class MeshMetrics {
             val spoolAttachPushed: Long = 0,
             val spoolAttachPulled: Long = 0,
             val spoolAttachDeferred: Long = 0,
+            val spoolAttachRefused: Long = 0,
         )
 
         /** The LoRa plane. */

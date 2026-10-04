@@ -243,6 +243,12 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   reload goes through `ModelLoadGuard` again, and `Interpreter.close()` is never called outside the lease.
   Never put `NsfwImageModerator` on a warm-up path. Regression: `ModelLeaseTest`, `ModelLoadGuardTest`,
   `MlTextModeratorWarmUpTest`; on hardware `ToxicityInstrumentedTest` / `NsfwInstrumentedTest`.
+- **When touching receive-side screening — `MeshBlobStore.ingest` / `saveIncoming`, `MeshManager.scopeBlobs()`,
+  `ScopeBlobs.refused`, or what adopts a received avatar or group photo (`InboundPipeline.avatarAdoptable`,
+  `adoptAdvertisedAvatar`, `settleArrivedGroupPhoto`):** READ `docs/CONTENT_MODERATION.md` §3 and §7. Every blob
+  that arrives from someone else, over the radios or a spool, goes through `ingest` before its obtained hook runs,
+  and a key-less one is always screened there, before it is stored, so "held" means "screened" (#109). A held avatar is adopted only if screening has not refused
+  it: a refused avatar's bytes can stay, pinned in custody by the sealed profile that names them.
 - **When touching `legal/`, `ui/about/`, `app/src/main/assets/legal/`, `THIRD-PARTY-NOTICES.md`, or a shipped
   dependency:** READ ADR 2026-09.6eb6. The in-app Open-source licenses list is `legal/ThirdPartyNotices.kt`,
   pinned to the notices table by `ThirdPartyNoticesSyncTest` and to `app/gradle.lockfile`'s
@@ -343,7 +349,8 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   / `fileInFlightTo`, or what re-asks for a blob (`rewantMissingBlobs`, the tick's `onNeighborAdded`):** READ
   ADR 2026-09.4tx5 (and 2026-09.ptv8 for the database re-arm). A blob is served only to a fresh ask — nothing
   is pushed to a peer that did not just ask, there is no wanter set — and "is it on the way" is a read of the
-  link, never a memo with a TTL: the receiver stays quiet for a hash whose header is in, the holder refuses a
+  link (and of the store, `BlobStore.storing`: a blob is screened before it is held, #109), never a memo with a
+  TTL: the receiver stays quiet for a hash whose header is in, the holder refuses a
   re-ask for a key still queued or streaming to that peer. The Bluetooth stack's buffer sits between those reads
   (ADR 2026-10.nxfb, #121): the tick asks nothing of a peer whose file is streaming in (`fileArrivingFrom`), and a
   file the link fed in full stays in flight while the link goes on feeding that peer. The lab pins it with `LabTransport.holdFiles` and

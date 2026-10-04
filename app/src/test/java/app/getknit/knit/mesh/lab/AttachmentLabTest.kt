@@ -55,8 +55,8 @@ class AttachmentLabTest {
 
             lab.assertConverged(listOf(alice, bob), atLeast = 1) { it.dmWith(if (it === alice) bob else alice) }
             assertTrue(picture.contentEquals(bob.attachmentPlain(bob.dmWith(alice), id)))
-            // The bytes are stored before they are screened, so the held bytes the oracle waited on do not mean
-            // the verdict exists yet.
+            // A sealed picture is screened once it is held and decrypted (`InboundPipeline.onObtained`), so the held
+            // bytes the oracle waited on do not mean the verdict exists yet.
             assertTrue(
                 "bob screened what he received",
                 lab.tryAwait(1) { if (bob.attachmentScreened(bob.dmWith(alice), id)) 1 else 0 },
@@ -115,7 +115,7 @@ class AttachmentLabTest {
 
             lab.assertConverged(listOf(alice, bob, carol), atLeast = 1) { Conversations.NEARBY }
             listOf(bob, carol).forEach { n ->
-                // Stored, then screened (`MeshBlobStore.saveIncoming`): the verdict trails the bytes.
+                // A room picture is key-less, so `MeshBlobStore.ingest` screens it before it is held (#109).
                 assertTrue(
                     "${n.name} screened the room picture",
                     lab.tryAwait(1) { if (n.attachmentScreened(Conversations.NEARBY, id)) 1 else 0 },

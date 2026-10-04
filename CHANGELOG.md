@@ -48,6 +48,9 @@ document:
 - A chat you deleted, someone you blocked or a group you left could still show up when you long-pressed the
   Knit icon, and tapping it opened an empty chat. That menu now matches your chat list and shows people's new
   photos and names.
+- With content filtering on, an explicit group photo or contact photo could still appear if it came through an
+  Internet relay, or after that contact next updated their profile. Knit now hides it, as it does any other
+  photo the filter catches.
 
 ## [2.8.0](https://github.com/getknit/knit/releases/tag/v2.8.0) — 2026-10-03T03:55:42Z
 

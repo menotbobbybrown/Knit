@@ -59,7 +59,12 @@ class ScopeSyncTest {
         val stored = LinkedHashMap<String, ByteArray>().apply { putAll(initial) }
         val mimes = LinkedHashMap<String, String>()
 
+        /** What this member's own screening refused, bytes dropped (#109). */
+        val refused = mutableSetOf<String>()
+
         override suspend fun has(aHash: String): Boolean = aHash in stored
+
+        override suspend fun refused(aHash: String): Boolean = aHash in refused
 
         override suspend fun bytes(aHash: String): ByteArray? = stored[aHash]
 
@@ -2179,6 +2184,54 @@ class ScopeSyncTest {
             assertTrue("the image still landed", receiver.blobs.stored.containsKey(aHash))
             assertTrue(bytes.contentEquals(receiver.blobs.stored.getValue(aHash)))
             sender.sync.stop()
+            receiver.sync.stop()
+        }
+
+    @Test
+    fun `a photo our own screening refused is neither asked about nor fetched until it is no longer refused`() =
+        runTest {
+            val spool = FakeSpool()
+            val (aHash, bytes) = image()
+            val sender = member(spool, alice, bob, blobs = FakeBlobs(aHash to bytes))
+            var receiverClock = now
+            val receiver =
+                member(
+                    spool,
+                    bob,
+                    alice,
+                    custody = FakeCustody(ttlMs = Long.MAX_VALUE / 2),
+                    blobs = FakeBlobs().apply { refused += aHash },
+                    clock = { receiverClock },
+                )
+            sender.custody.store(
+                dmFrame("m1", from = alice, to = bob, sentAt = now, attachmentHash = aHash),
+                ForwardStore.ORIGIN_SELF,
+                now,
+            )
+            sender.sync.start(backgroundScope)
+            pump(rounds = 12)
+            sender.sync.stop()
+            val aid = aidHex(alice, bob, aHash)
+            assertEquals(ScopeAttachments.chunkCount(bytes.size), spool.chunkCount(scopeHex(alice, bob), aid))
+            spool.presenceAsks.clear()
+
+            receiver.sync.start(backgroundScope)
+            pump(rounds = 16)
+
+            // #109: the bytes were dropped on purpose and would only be dropped again — the radios skip it too.
+            assertTrue("the frame itself still crossed", receiver.delivered.isNotEmpty())
+            assertFalse(receiver.blobs.stored.containsKey(aHash))
+            assertEquals(emptyList<String>(), receiver.obtained)
+            assertEquals("no round trip for a refused photo", emptyList<String>(), spool.presenceAsks)
+            assertEquals(emptyList<String>(), spool.chunkGets)
+
+            // Filtering turned off: the next timed look fetches it like any other.
+            receiver.blobs.refused.clear()
+            receiverClock = now + 11 * 60_000L
+            pump(rounds = 70)
+
+            assertTrue("fetched once no longer refused", receiver.blobs.stored.containsKey(aHash))
+            assertEquals(listOf(aHash), receiver.obtained)
             receiver.sync.stop()
         }
 

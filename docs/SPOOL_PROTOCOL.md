@@ -1168,6 +1168,12 @@ The round, per attachment:
    and by
    §9.2's guard applied to the newest frame that references the attachment.
 
+> **Local screening is the client's.** Step 3's store screens what it receives exactly as a radio pull's
+> does, so a client that refused an image and dropped its bytes (the Android client, content filtering on)
+> MAY skip steps 1–3 for that attachment rather than fetch it again only to drop it. That is local policy: it
+> touches neither digest (§4.5 keeps attachments out of them) nor the push half, which needs bytes it no
+> longer holds.
+
 | ID          | Requirement                                                                                                                                                |
 |-------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **C-9.5-3** | A retiring scope (§3.1, §3.3) is pulled but never refilled, mirroring frames.                                                                              |

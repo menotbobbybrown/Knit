@@ -63,6 +63,11 @@ class BlobExchangeTest {
 
         override suspend fun has(hash: String): Boolean = File(dir, hash).exists()
 
+        /** What the real store reports while a blob is past the link's end but screened and not yet held. */
+        val storingNow: MutableSet<String> = ConcurrentHashMap.newKeySet()
+
+        override fun storing(hash: String): Boolean = hash in storingNow
+
         override suspend fun fileFor(hash: String): File? = File(dir, hash).takeIf { it.exists() }
 
         override suspend fun mimeFor(hash: String): String? = mimes[hash]
@@ -402,6 +407,45 @@ class BlobExchangeTest {
             r.arriving.clear() // the link died mid-stream
             exchange.onNeighborAdded(Peer("n"))
             assertEquals("the next tick asks again", listOf("H"), asked)
+        }
+
+    @Test
+    fun aBlobTheStoreIsStillScreeningIsNeitherAskedForNorReAsked() =
+        runTest(UnconfinedTestDispatcher()) {
+            // #109: the store screens a blob before it holds it, so past the link's end — no longer arriving — a
+            // whole classification can pass before `has`. A tick or a want in that gap bought a second copy.
+            val r = FakeLoopTransport("r")
+            val n = FakeLoopTransport("n")
+            val store = FakeBlobStore(Files.createTempDirectory("blob-storing").toFile())
+            val exchange =
+                BlobExchange(
+                    transport = r,
+                    store = store,
+                    selfId = { "r" },
+                    onObtained = { _, _ -> },
+                    now = { 0L },
+                    partials = partials(),
+                )
+            val asked = CopyOnWriteArrayList<String>()
+            backgroundScope.launch {
+                n.inbound.collect { f ->
+                    if (f.envelope.type == FrameType.BLOB_REQ) {
+                        WireCodec.decodePayload<BlobReqContent>(f.envelope.payload)?.let { asked += it.hash }
+                    }
+                }
+            }
+
+            exchange.want("H") // nobody linked yet — marked, nothing sent
+            r.connect(n)
+            store.storingNow += "H" // its copy came in and is being screened
+            exchange.onNeighborAdded(Peer("n"))
+            store.storingNow += "G"
+            exchange.want("G")
+            assertTrue("nothing is asked for a blob the store is storing", asked.isEmpty())
+
+            store.storingNow.clear() // the store refused both copies
+            exchange.onNeighborAdded(Peer("n"))
+            assertEquals("the memo still holds H, so the next tick asks again; G was never marked", listOf("H"), asked)
         }
 
     @Test

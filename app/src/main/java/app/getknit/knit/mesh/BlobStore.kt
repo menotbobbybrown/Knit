@@ -25,4 +25,12 @@ interface BlobStore {
         mime: String,
         srcPath: String,
     ): File?
+
+    /**
+     * Whether [hash]'s bytes are in hand and on their way into the store right now: checked against the hash,
+     * screened, not yet held. A read of live state, like `MeshTransport.arrivingFiles` (ADR 2026-09.4tx5) — the
+     * screen runs before the insert (#109), so between a file's end on the link and [has] there can be a whole
+     * classification. The default is never.
+     */
+    fun storing(hash: String): Boolean = false
 }
