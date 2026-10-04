@@ -41,6 +41,7 @@ import java.io.PipedOutputStream
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Unit tests for [FramedLink] — the transport-agnostic per-connection read/write/file/digest loops extracted
@@ -474,6 +475,30 @@ class FramedLinkTest {
     }
 
     @Test
+    fun theLinkCountsAsFeedingWheneverItsPaceIsRead() {
+        // #117: the Bluetooth transport splits its budget among the links whose `txInProgress` is set, so a link must
+        // count itself every time it reads its pace, and stop counting once the file is out.
+        val linkRef = AtomicReference<FramedLink>()
+        val seen = LinkedBlockingQueue<Boolean>()
+        val h =
+            harness(pace = {
+                seen.add(linkRef.get().txInProgress)
+                PaceConfig()
+            })
+        linkRef.set(h.link)
+        val body = ByteArray(40 * 1024) { (it % 251).toByte() }
+        val file = tmp.newFile("feeding.bin").apply { writeBytes(body) }
+
+        h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, "f".repeat(64), "image/webp"))
+        LinkFraming.read(h.fromLink) // the header
+        assertArrayEquals(body, readFileBody(h.fromLink))
+
+        assertTrue("the pace was read", seen.isNotEmpty())
+        assertTrue("feeding at every read, saw $seen", seen.all { it })
+        assertTrue("not feeding once the file is out", awaitUntil { !h.link.txInProgress })
+    }
+
+    @Test
     fun digestsSentWhileTheWriterIsBusyCollapseIntoTheNewest() {
         // ADR 2026-09.tjfb: on a slow link a back-fill held one digest per 60 s re-offer, each minutes stale when
         // written and each ahead of every frame queued after it. A 1 KiB out-pipe holds the writer inside the
@@ -695,6 +720,7 @@ class FramedLinkTest {
         val key = "3".repeat(64)
         h.link.sendFile(File(tmp.root, "evicted.bin"), FileMeta(FileKind.ATTACHMENT, key, "image/jpeg"))
         assertTrue("released", awaitUntil { !h.link.hasPendingFile(key) })
+        assertFalse("no longer counted as feeding (#117)", h.link.txInProgress)
         val payload = frameBytes(id = "after01", senderId = "me000001")
         h.link.send(payload)
         val rec = LinkFraming.read(h.fromLink)

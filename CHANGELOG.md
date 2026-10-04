@@ -40,6 +40,9 @@ document:
   full speed for three minutes first.
 - A large photo or file on a connection that kept dropping started over each time, so it might never arrive.
   It now picks up where it stopped, as long as the phone sending the rest runs this version.
+- A message sent while a photo was going to the same phone over Bluetooth could wait a minute or more, until
+  the photo finished. Messages now arrive within a few seconds, but photos take longer, especially when
+  several nearby phones download the same one.
 
 ## [2.8.0](https://github.com/getknit/knit/releases/tag/v2.8.0) — 2026-10-03T03:55:42Z
 

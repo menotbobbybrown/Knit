@@ -497,10 +497,16 @@ class CodedPhyPolicyTest {
 
     @Test
     fun everyOtherPhyKeepsTheOneMPace() {
-        val oneM = PaceConfig(CodedPhyPolicy.BLE_PACE_BYTES_PER_SEC, LinkFraming.FILE_CHUNK_BYTES)
-        for (phy in listOf(LinkPhy.ONE_M, LinkPhy.TWO_M, LinkPhy.UNKNOWN)) {
+        val oneM = CodedPhyPolicy.pace(LinkPhy.ONE_M, tuning)
+        for (phy in listOf(LinkPhy.TWO_M, LinkPhy.UNKNOWN)) {
             assertEquals("$phy", oneM, CodedPhyPolicy.pace(phy, tuning))
         }
+    }
+
+    @Test
+    fun aLinkAloneOnOneMIsFedFourKibPerSecondInEightKibChunks() {
+        // #117: 1M links drained 4.8–10 KB/s on 2026-10-03; at 28 KiB/s a text sent mid-photo waited one to four minutes.
+        assertEquals(PaceConfig(4096, 8192), CodedPhyPolicy.pace(LinkPhy.ONE_M, PhyTuning()))
     }
 
     @Test
@@ -527,6 +533,34 @@ class CodedPhyPolicyTest {
     fun anUnboundedOneMPaceStaysUnboundedInWholeChunks() {
         val unbounded = PaceConfig(0, LinkFraming.FILE_CHUNK_BYTES)
         assertEquals(unbounded, CodedPhyPolicy.pace(LinkPhy.ONE_M, tuning.copy(filePaceBytesPerSec = 0)))
-        assertEquals(unbounded, CodedPhyPolicy.pace(LinkPhy.UNKNOWN, tuning.copy(filePaceBytesPerSec = -1)))
+        assertEquals(unbounded, CodedPhyPolicy.pace(LinkPhy.UNKNOWN, tuning.copy(filePaceBytesPerSec = -1), feeding = 3))
+    }
+
+    @Test
+    fun theOneMBudgetIsSplitAmongTheLinksFeeding() {
+        // #117: one controller's air carries every link, so three photos fed at once share the budget.
+        val budget = tuning.copy(filePaceBytesPerSec = 8192)
+        assertEquals(8192, CodedPhyPolicy.pace(LinkPhy.ONE_M, budget, feeding = 1).bytesPerSec)
+        assertEquals(4096, CodedPhyPolicy.pace(LinkPhy.ONE_M, budget, feeding = 2).bytesPerSec)
+        assertEquals(2730, CodedPhyPolicy.pace(LinkPhy.TWO_M, budget, feeding = 3).bytesPerSec)
+    }
+
+    @Test
+    fun aSplitShareTakesChunksOfTwoSecondsOfIt() {
+        val budget = tuning.copy(filePaceBytesPerSec = 8192)
+        assertEquals(PaceConfig(2730, 5460), CodedPhyPolicy.pace(LinkPhy.ONE_M, budget, feeding = 3))
+        assertEquals(PaceConfig(1024, 2048), CodedPhyPolicy.pace(LinkPhy.ONE_M, budget, feeding = 8))
+    }
+
+    @Test
+    fun aFeedingCountUnderOneIsTheLinkAlone() {
+        // The link asking is always feeding; a count that missed it (a race at the start) never divides by zero.
+        val budget = tuning.copy(filePaceBytesPerSec = 8192)
+        assertEquals(CodedPhyPolicy.pace(LinkPhy.ONE_M, budget), CodedPhyPolicy.pace(LinkPhy.ONE_M, budget, feeding = 0))
+    }
+
+    @Test
+    fun aCodedLinkIgnoresTheSplit() {
+        assertEquals(PaceConfig(1024, 2048), CodedPhyPolicy.pace(LinkPhy.CODED, tuning, feeding = 5))
     }
 }

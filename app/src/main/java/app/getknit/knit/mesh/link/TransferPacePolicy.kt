@@ -9,8 +9,10 @@ package app.getknit.knit.mesh.link
  * into the local socket → BT-stack TX queue and returns, so the writer dumps a whole small blob into that queue
  * in a burst — a frame enqueued *afterwards* lands behind the entire file and only reaches the wire once it
  * drains ("text arrives only when the transfer completes"), and the saturated ACL starves the reverse direction
- * too. Pacing the file feed to ~link capacity keeps that queue shallow: interleaved frames sit near the wire
- * head and the freed connection-event budget carries reverse traffic.
+ * too. Pacing the file feed below what the air drains keeps that queue shallow: interleaved frames sit near the
+ * wire head and the freed connection-event budget carries reverse traffic. The stack's queue holds hundreds of KB
+ * before a write blocks, so the sender cannot see the drain; it is the receiver's `rx … in <ms>ms` line that
+ * measures it, never the sender's `file … in` line, which reads size ÷ pace (#117).
  *
  * Kept free of Android and of a clock (the caller stamps `elapsedMs` from the link's injected `now`), like
  * [app.getknit.knit.mesh.bluetooth.ConnectBackoffPolicy], so the curve is asserted with the same unit-test

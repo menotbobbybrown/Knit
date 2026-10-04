@@ -595,18 +595,23 @@ that reports `isLeCodedPhySupported`:
   mode asks for 1M alone. The larger id drives. A request unanswered in
   3 s, or answered with another PHY, gives up for the link (a controller without Coded answers nothing at all).
   Mode OFF lets the handles go and leaves each link on its PHY: asking a far Coded link back to 1M drops it.
-- **A file is paced by the link's PHY** (#114). `FramedLink` reads its `PaceConfig` before every chunk:
-  `CodedPhyPolicy.pace` gives a link last read on Coded 1 KiB/s in 2 KiB chunks (`PhyTuning.codedPaceBytesPerSec` /
-  `codedChunkBytes`), any other 28 KiB/s in 16 KiB, and a change restarts the pace's clock (`PaceWindow`). The PHY a
-  link was last read on outlives its handle (`linkPhy`), since OFF leaves the link where it is. At 28 KiB/s a whole
-  photo reached a Coded link's stack in seconds and every frame after it waited minutes. No wire change.
+- **A file is paced by the link's PHY** (#114) **and by how many links share the radio** (#117, ADR 2026-10.8jwn).
+  `FramedLink` reads its `PaceConfig` before every chunk: `CodedPhyPolicy.pace` gives a link last read on Coded 1 KiB/s
+  in 2 KiB chunks (`PhyTuning.codedPaceBytesPerSec` / `codedChunkBytes`), and every other link its share of one
+  4 KiB/s budget (`PhyTuning.filePaceBytesPerSec`), split evenly among the 1M/2M links feeding a file right now
+  (`BluetoothMeshTransport.paceFor` counts `txInProgress`), in chunks of two seconds of the share (2–16 KiB). A change
+  restarts the pace's clock (`PaceWindow`). The PHY a link was last read on outlives its handle (`linkPhy`), since OFF
+  leaves the link where it is. The stack's queue holds hundreds of KB before a write blocks, so only the receiver's
+  `rx … in <ms>ms` line shows the drain: on 2026-10-03 three 1M Pixel pairs drained 4.8–10 KB/s, and at the old
+  28 KiB/s a text sent mid-photo waited one to four minutes. No wire change.
 - **Diagnostics** draws a PHY chip on each directly-connected row with a handle (`CodedPhyDiag.linkPhys`, testTag
   `ble_phy_chip_<nodeId>`).
 
 Oracles: `bt phy mode=…`, `bt coded advert live|dark <status>`, `via=coded|1m` on `bt initiating to`,
 `bt phy <id> link dropped on <PHY> rssi=… (<reason>)`, `bt coded advert fast (…)` / `slow`, `bt coded advert
 refused <status>, retry in …` / `enabled again`, `bt coded advert retry n/5`,
-`bt phy <id> ONE_M→CODED rssi=… (auto)`, `bt phy <id> gave up …`, `file …/… <N>B in <ms>ms @<pace>`, `bt scan coded windows on|off`,
+`bt phy <id> ONE_M→CODED rssi=… (auto)`, `bt phy <id> gave up …`, `file …/… <N>B in <ms>ms @<pace>` (the hand-off) and
+`rx …/… <N>B in <ms>ms` (the drain), `bt file pace budget=… feeding=… share=… chunk=…`, `bt scan coded windows on|off`,
 `bt refused client … codedOnly=`, and once a minute `bt coded heard <id> hits=… rssi=a..b 1m=… eff=… dwell=…
 promotable=… dials=…` per unlinked peer heard on Coded (raise the log ring with `adb logcat -G 16M` before a walk);
 counters `bleCoded*` / `blePhy*`; the `…debug.PHY` reply lists each link's PHY and link RSSI and each peer's

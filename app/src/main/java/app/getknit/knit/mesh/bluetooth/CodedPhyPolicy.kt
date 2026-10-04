@@ -85,8 +85,9 @@ data class PhyTuning(
     val codedPaceBytesPerSec: Int = 1024,
     val codedChunkBytes: Int = 2048,
     /**
-     * A file's feed rate on a link on 1M or 2M ([CodedPhyPolicy.pace]); ≤ 0 is unbounded. `…debug.PHY --ei filePace`
-     * sweeps it in a trial against the receiver's `rx … in <ms>ms` line (#117).
+     * The file-feed budget every link on 1M or 2M shares, split among the ones feeding a file at once
+     * ([CodedPhyPolicy.pace]); ≤ 0 is unbounded. `…debug.PHY --ei filePace` sweeps it in a trial against the
+     * receiver's `rx … in <ms>ms` line (#117).
      */
     val filePaceBytesPerSec: Int = CodedPhyPolicy.BLE_PACE_BYTES_PER_SEC,
 ) {
@@ -221,15 +222,17 @@ object CodedPhyPolicy {
         }
 
     /**
-     * Average file-feed cap on an L2CAP CoC link on 1M or 2M (NAN stays unbounded). A blob otherwise bursts into the
-     * BT-stack TX queue ahead of any later text frame and saturates the ACL, so chat stalls until the transfer completes
-     * and the reverse direction is starved. Holding the feed BELOW real L2CAP throughput keeps that queue shallow, so
-     * interleaved frames reach the wire promptly and reverse traffic gets connection-event budget. Deliberately
-     * conservative — the transfer is a bit slower in exchange for live chat. Tune against the receiver's
-     * `rx …/… <N>B in <ms>ms` line (FileIntake): the sender's `file … in` line times only the hand-off to the stack,
-     * so it always reads size ÷ pace (#117).
+     * The average file-feed budget for this phone's L2CAP CoC links on 1M or 2M, shared by every one feeding a file at
+     * once (NAN stays unbounded). A blob otherwise bursts into the BT-stack TX queue ahead of any later text frame and
+     * saturates the ACL, so chat stalls until the transfer completes and the reverse direction is starved. Holding the
+     * feed BELOW what the air drains keeps that queue shallow, so interleaved frames reach the wire promptly and reverse
+     * traffic gets connection-event budget. One controller's air carries every link, so three feeds at once share one
+     * budget rather than each taking it whole. 4 KiB/s sits under the slowest drain measured on 1M (4.8 KB/s across
+     * three Pixel pairs, 2026-10-03), where 28 KiB/s left a text sent mid-photo waiting one to four minutes (#117, ADR
+     * 2026-10.8jwn). Tune against the receiver's `rx …/… <N>B in <ms>ms` line (FileIntake): the sender's `file … in`
+     * line times only the hand-off to the stack, so it reads size ÷ pace.
      */
-    const val BLE_PACE_BYTES_PER_SEC = 28 * 1024
+    const val BLE_PACE_BYTES_PER_SEC = 4 * 1024
 
     /** The smallest chunk a 1M/2M feed takes, as small as the Coded default's. */
     private const val MIN_FILE_CHUNK_BYTES = 2048
@@ -238,30 +241,35 @@ object CodedPhyPolicy {
     private const val CHUNK_FEED_SECONDS = 2
 
     /**
-     * The pace a file is fed to a Bluetooth link at, by the PHY the link was last read on. [PhyTuning.filePaceBytesPerSec]
-     * is sized for 1M/2M, in chunks of about [CHUNK_FEED_SECONDS] of feed (16 KiB at the default); a link on Coded S=8
-     * drains far slower, and at that pace a whole photo reached the stack in seconds and every frame after it waited
-     * minutes behind it (#114). So Coded takes [PhyTuning.codedPaceBytesPerSec] in [PhyTuning.codedChunkBytes] chunks.
-     * A link not yet read (or with no PHY handle: the experiment off) keeps the 1M pace.
+     * The pace a file is fed to a Bluetooth link at, by the PHY the link was last read on. A link on 1M or 2M takes its
+     * share of [PhyTuning.filePaceBytesPerSec]: the budget split evenly among the [feeding] links on 1M or 2M streaming
+     * a file right now, this one included (ADR 2026-10.8jwn), in chunks of about [CHUNK_FEED_SECONDS] of that share, so a frame
+     * queued mid-file waits about one chunk on the feed side. A link on Coded S=8 drains far slower, and at the 1M pace
+     * a whole photo reached the stack in seconds and every frame after it waited minutes behind it (#114). So Coded
+     * takes [PhyTuning.codedPaceBytesPerSec] in [PhyTuning.codedChunkBytes] chunks, outside the split. A link not yet
+     * read (or with no PHY handle: the experiment off) is paced as 1M.
      */
     fun pace(
         phy: LinkPhy,
         tuning: PhyTuning,
+        feeding: Int = 1,
     ): PaceConfig =
         if (phy == LinkPhy.CODED) {
             PaceConfig(tuning.codedPaceBytesPerSec, tuning.codedChunkBytes.coerceIn(1, LinkFraming.FILE_CHUNK_BYTES))
         } else {
-            filePace(tuning.filePaceBytesPerSec)
+            filePace(tuning.filePaceBytesPerSec, feeding)
         }
 
-    /** A 1M/2M feed at [bytesPerSec], in chunks of [CHUNK_FEED_SECONDS] of it; unbounded at ≤ 0. */
-    private fun filePace(bytesPerSec: Int): PaceConfig =
-        if (bytesPerSec <= 0) {
-            PaceConfig(0, LinkFraming.FILE_CHUNK_BYTES)
-        } else {
-            val chunk = bytesPerSec.toLong() * CHUNK_FEED_SECONDS
-            PaceConfig(bytesPerSec, chunk.coerceIn(MIN_FILE_CHUNK_BYTES.toLong(), LinkFraming.FILE_CHUNK_BYTES.toLong()).toInt())
-        }
+    /** One of [feeding] 1M/2M feeds sharing [budget] B/s, in chunks of [CHUNK_FEED_SECONDS] of its share; unbounded at ≤ 0. */
+    private fun filePace(
+        budget: Int,
+        feeding: Int,
+    ): PaceConfig {
+        if (budget <= 0) return PaceConfig(0, LinkFraming.FILE_CHUNK_BYTES)
+        val share = (budget / feeding.coerceAtLeast(1)).coerceAtLeast(1)
+        val chunk = share.toLong() * CHUNK_FEED_SECONDS
+        return PaceConfig(share, chunk.coerceIn(MIN_FILE_CHUNK_BYTES.toLong(), LinkFraming.FILE_CHUNK_BYTES.toLong()).toInt())
+    }
 
     /** Which side of a link drives its PHY: the larger node id, the side that dials. The other only watches. */
     fun drives(

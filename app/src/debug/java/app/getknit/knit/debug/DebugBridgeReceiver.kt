@@ -208,15 +208,16 @@ import java.nio.ByteBuffer
  * - [ACTION_PHY] — the **BLE Coded PHY experiment** (ADR 2026-10.yvn6; `BuildConfig.BLE_CODED_PHY`, else an error).
  *   `--es mode off|auto|coded|1m` stores the mode (`SettingsStore.debugBlePhyMode`, applied live), `--es txpower
  *   high|medium` re-raises the Coded advert, and `--ei stepDown|stepUp|stepDownReads|minGapMs|stepUpHoldMs N` and
- *   `--ei stepUpFast|stepUpFastHoldMs N` (−62, 10000) override the step thresholds, `--ei credit N` the dB a Coded advert reading gains on the 1M scale (12), and
- *   `--ei fastAdvertMs|fastHoldMs N` the Coded advert's interval after a link at range drops (250) and how long it
- *   holds (180000), `--ei codedPace|codedChunk N` a file's feed rate in B/s and chunk on a link on Coded (1024, 2048), and
- *   `--ei filePace N` the feed rate on a link on 1M or 2M (28672; 0 unbounded; its chunk is two seconds of it, 2048 to
- *   16384 — #117), until the process dies (`--ez resetTuning true` restores them). The reply: `mode`, `supported`, `advert`
- *   (off|starting|live|dark <status>), `txPower`, the tuning (with `fileChunk`, the 1M/2M chunk), `links[]` (nodeId, phy, linkRssi, drives, attached,
- *   switches, gaveUp) and `peers[]` (nodeId, rssi on the 1M scale, oneMSeenAgoMs, codedSeenAgoMs, each PHY's own
- *   rssi1m / rssiCoded, and codedLagMs — the 1M listening its Coded hits outlast its 1M ones by; over 8000 is Coded
- *   alone).
+ *   `--ei stepUpFast|stepUpFastHoldMs N` (−62, 10000) override the step thresholds, `--ei credit N` the dB a Coded
+ *   advert reading gains on the 1M scale (12), `--ei fastAdvertMs|fastHoldMs N` the Coded advert's interval after a
+ *   link at range drops (250) and how long it holds (180000), `--ei codedPace|codedChunk N` a file's feed rate in B/s
+ *   and chunk on a link on Coded (1024, 2048), and `--ei filePace N` the file budget the links on 1M or 2M share, split
+ *   among those feeding (4096; 0 unbounded; a share's chunk is two seconds of it, 2048 to 16384 — ADR 2026-10.8jwn),
+ *   until the process dies (`--ez resetTuning true` restores them). The reply: `mode`, `supported`, `advert`
+ *   (off|starting|live|dark <status>), `txPower`, the tuning (with `fileChunk`, a lone 1M/2M feed's chunk), `links[]`
+ *   (nodeId, phy, linkRssi, drives, attached, switches, gaveUp) and `peers[]` (nodeId, rssi on the 1M scale,
+ *   oneMSeenAgoMs, codedSeenAgoMs, each PHY's own rssi1m / rssiCoded, and codedLagMs — the 1M listening its Coded hits
+ *   outlast its 1M ones by; over 8000 is Coded alone).
  * - [ACTION_HEAL] — nudges the transport to rescan/re-advertise.
  * - [ACTION_PAUSE] / [ACTION_RESUME] — the notification's Pause and Resume, by their store write alone
  *   (`--ei minutes 15|60`, the two offered spans): `MeshService` follows `SettingsStore.meshPausedUntil`, so

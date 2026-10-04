@@ -68,6 +68,12 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   gets a 25 s watchdog, and a link that drops at range makes the dialed side's Coded advert fast for 3 min, its
   interval moved in place (`CodedAdvertPace`, `BleAdvertiser.setInterval`; the amendment of 2026-10-02). CHECK
   `.agents/memory/roadmap.md` for what the release flag waits on.
+- **When touching `CodedPhyPolicy.pace`, `PhyTuning.filePaceBytesPerSec` / `BLE_PACE_BYTES_PER_SEC`, `PaceConfig` /
+  `PaceWindow` / `TransferPacePolicy`, `BluetoothMeshTransport.paceFor`, or `FramedLink`'s `pace`:** READ ADR
+  2026-10.8jwn. A Bluetooth file is fed below what the air drains, from one budget split evenly among the 1M/2M links
+  feeding a file at once (`txInProgress`), in chunks of two seconds of the share; Coded keeps its own pace outside the
+  split (yvn6's #114 amendment). The stack's queue hides the drain from the sender, so tune against the receiver's
+  `rx … in <ms>ms` line — never the sender's `file … in`, which reads size ÷ pace. No wire change.
 - **When touching `mesh/lora/` or `mesh/bluetooth/meshtastic/` (the LoRa/Meshtastic bridge):** READ
   `.agents/context/lora-bridge.md` — a Meshtastic board over BLE GATT extends the **Nearby room and 1:1
   DMs** over LoRa as a fast-plane-only `MeshTransport` child, shipped visible since 2.5.0 behind

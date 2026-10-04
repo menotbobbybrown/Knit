@@ -73,6 +73,18 @@ class TransferPacePolicyTest {
     }
 
     @Test
+    fun aSplitChangeChargesTheNextChunkAtTheNewShare() {
+        // #117: a 16 KiB chunk at the whole 8 KiB/s budget owes 2 s, served before the next chunk. Two more feeds start:
+        // the next 5460 B chunk is charged at the third share from there, 2 s again, not at the old rate.
+        val alone = PaceConfig(bytesPerSec = 8192, chunkBytes = 16384)
+        val third = PaceConfig(bytesPerSec = 2730, chunkBytes = 5460)
+        val window = PaceWindow(alone, startedAt = 0)
+        assertEquals(2000, window.fed(16384, now = 0))
+        window.rebase(third, now = 2000)
+        assertEquals(2000, window.fed(5460, now = 2000))
+    }
+
+    @Test
     fun aStepUpDoesNotPayOffTheSlowStretch() {
         // 60 s on Coded fed 60 KiB on budget. Stepping up to 28 KiB/s starts a fresh window, so the first fast chunk
         // owes its own ~571 ms rather than nothing (an average since the file began would let a burst through).

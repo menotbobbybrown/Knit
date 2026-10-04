@@ -42,6 +42,7 @@ import app.getknit.knit.mesh.link.FramedLink
 import app.getknit.knit.mesh.link.LinkCallbacks
 import app.getknit.knit.mesh.link.LinkCrossings
 import app.getknit.knit.mesh.link.LinkHandshake
+import app.getknit.knit.mesh.link.PaceConfig
 import app.getknit.knit.mesh.power.ElapsedWait
 import app.getknit.knit.mesh.power.PowerPolicy
 import app.getknit.knit.mesh.power.PowerState
@@ -188,6 +189,9 @@ class BluetoothMeshTransport(
     // its PHY (BlePhyControl.close), and a file fed to a link still on Coded must keep Coded's pace (#114). Dropped
     // with the link.
     private val linkPhy = ConcurrentHashMap<FramedLink, LinkPhy>()
+
+    // The feeding count [paceFor] last logged, so `bt file pace` is written when the split changes, not every chunk.
+    @Volatile private var lastFeeding = 0
     private val linkDevices = ConcurrentHashMap<FramedLink, BluetoothDevice>()
 
     // What each unlinked peer's adverts did this minute, logged by [diagLoop] as `bt coded heard` while the experiment
@@ -932,8 +936,26 @@ class BluetoothMeshTransport(
         CodedPhyDiag.publishLinkPhys(known.associate { (_, status) -> status.nodeId to status.phy })
     }
 
-    /** The pace a file is fed to [link] at, by the PHY it was last read on (#114, ADR 2026-10.yvn6). */
-    private fun paceFor(link: FramedLink) = CodedPhyPolicy.pace(linkPhy[link] ?: LinkPhy.UNKNOWN, CodedPhyDiag.tuning)
+    /**
+     * The pace a file is fed to [link] at, by the PHY it was last read on (#114, ADR 2026-10.yvn6), and on 1M/2M by how
+     * many links share the budget right now (#117, ADR 2026-10.8jwn): every link here streaming a file and not on Coded, this one included.
+     * Read before each chunk, so a feed that starts or ends re-splits the others at their next chunk. A feed whose
+     * writes stall keeps its share until its write fails.
+     */
+    private fun paceFor(link: FramedLink): PaceConfig {
+        val phy = linkPhy[link] ?: LinkPhy.UNKNOWN
+        val feeding = links.values.count { it.txInProgress && linkPhy[it] != LinkPhy.CODED }
+        val pace = CodedPhyPolicy.pace(phy, CodedPhyDiag.tuning, feeding)
+        if (phy != LinkPhy.CODED && feeding != lastFeeding) {
+            lastFeeding = feeding
+            Log.i(
+                TAG,
+                "bt file pace budget=${CodedPhyDiag.tuning.filePaceBytesPerSec} feeding=$feeding " +
+                    "share=${pace.bytesPerSec} chunk=${pace.chunkBytes}",
+            )
+        }
+        return pace
+    }
 
     /** Gives [link] a PHY handle if the experiment runs, its peer was heard on Coded, and it has none yet. */
     private fun ensurePhyControl(link: FramedLink) {

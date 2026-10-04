@@ -67,7 +67,8 @@ class FramedLink(
     private val callbacks: LinkCallbacks,
     private val now: () -> Long,
     // The file feed's pace for a slow shared channel (BLE L2CAP), read before every chunk so a link that changes
-    // PHY mid-transfer is paced by the one it is on now; unbounded (Wi-Fi Aware NDP, and the default so existing
+    // PHY mid-transfer is paced by the one it is on now, and one whose share of the radio's budget changes as other
+    // feeds start and end takes the new share (#117); unbounded (Wi-Fi Aware NDP, and the default so existing
     // callers/tests are unchanged). See [TransferPacePolicy] and [PaceWindow] for the why.
     private val pace: () -> PaceConfig = { PaceConfig() },
     private val log: (String) -> Unit = {},
@@ -377,8 +378,9 @@ class FramedLink(
                 out.flush()
                 touch()
                 if (offset > 0) metrics.onFileResumedOut()
-                // The per-plane throughput evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets), with
-                // the pace the feed ended on (0 = unbounded). A resume's offset rides last, so every parse of the line
+                // The per-plane feed evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets), with the
+                // pace the feed ended on (0 = unbounded). On a paced link it times the hand-off to the stack, not the air:
+                // the receiver's `rx … in <ms>ms` line is the drain (#117). A resume's offset rides last, so every parse of the line
                 // before it holds — and `file <KIND>/<hash>` still counts the serves (ADR 2026-09.4tx5).
                 val from = if (offset > 0) " from $offset" else ""
                 log("file ${meta.kind.wire}/${meta.key} ${bytes}B in ${now() - startedAt}ms @${cfg.bytesPerSec} → $nodeId$from")

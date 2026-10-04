@@ -355,3 +355,7 @@ Tests: `TransferPacePolicyTest` (the Coded rate, and the window restarting on a 
 2 KiB chunks waits a chunk, not the file; a pace change takes the next chunk). A desk trial is owed: `mode coded`, a
 ~200 KB image then a text, the text's arrival timed on the receiver against the same run in `auto`. A walk at the
 edge is owed after it.
+
+The 1M/2M side of this pace moved to ADR 2026-10.8jwn (#117): one 4 KiB/s budget split among the links on 1M or 2M
+feeding a file at once, in chunks of two seconds of the share. A link on Coded keeps the pace above, outside the
+split.
