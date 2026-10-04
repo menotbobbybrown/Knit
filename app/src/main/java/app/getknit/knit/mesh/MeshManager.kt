@@ -2298,18 +2298,26 @@ class MeshManager(
         session.launch {
             while (true) {
                 delay(NEIGHBOR_REOFFER_INTERVAL_MS)
-                val neighbors = transport.neighbors.value
-                // Before the per-neighbor re-ask, so a want the 30-min sweep reclaimed is back in the memo it
-                // reads from; skipped with nobody linked, where a want has nowhere to go anyway.
-                if (neighbors.isNotEmpty()) rewantMissingBlobs()
-                neighbors.forEach { peer ->
-                    forwardSync.onNeighborAdded(peer) // re-advertise our custody digest → pull anything we lack
-                    blobExchange.onNeighborAdded(peer) // re-ask for blobs we still need
-                    keyExchange.onNeighborAdded(peer) // re-ask for keys we still need
-                    ackSync.onNeighborAdded(peer) // re-send any broadcast/group delivery tick we owe it
-                    flushPendingGroupKeysFor(peer.nodeId) // re-send unacked group epoch seeds it never got
-                }
+                reofferToNeighbors()
             }
+        }
+    }
+
+    /**
+     * One round of the 60 s re-offer ([reofferToNeighborsPeriodically]). `internal` so `mesh/lab` can run the tick
+     * inside a scenario, whose `delay()`-based loop a lab clock jump never wakes.
+     */
+    internal suspend fun reofferToNeighbors() {
+        val neighbors = transport.neighbors.value
+        // Before the per-neighbor re-ask, so a want the 30-min sweep reclaimed is back in the memo it
+        // reads from; skipped with nobody linked, where a want has nowhere to go anyway.
+        if (neighbors.isNotEmpty()) rewantMissingBlobs()
+        neighbors.forEach { peer ->
+            forwardSync.onNeighborAdded(peer) // re-advertise our custody digest → pull anything we lack
+            blobExchange.onNeighborAdded(peer) // re-ask for blobs we still need
+            keyExchange.onNeighborAdded(peer) // re-ask for keys we still need
+            ackSync.onNeighborAdded(peer) // re-send any broadcast/group delivery tick we owe it
+            flushPendingGroupKeysFor(peer.nodeId) // re-send unacked group epoch seeds it never got
         }
     }
 

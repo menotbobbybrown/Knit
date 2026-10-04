@@ -482,7 +482,8 @@ opaque SHA-256-addressed bytes with a MIME string beside them, which is why voic
   - `onRequest(hash, fromNodeId, offset)` — if we hold the blob, send it straight back over the file channel
     (`FileKind.ATTACHMENT`) — from the asker's `offset` when it kept the start of a cut transfer (ADR
     2026-10.wtyc) — unless a copy is already queued or streaming to that peer
-    (`MeshTransport.fileInFlightTo`) or was enqueued inside the per-(hash, peer) **serve memo** (45 s,
+    (`MeshTransport.fileInFlightTo`, which also covers a file the link fed in full while it goes on feeding
+    that peer, ADR 2026-10.nxfb) or was enqueued inside the per-(hash, peer) **serve memo** (45 s,
     un-stamped if the enqueue is refused). If not, **recurse** by calling `want(hash)` on the asker's
     behalf, and remember nothing about the asker (ADR 2026-09.4tx5): the asker re-asks on its own 60 s
     tick while it still lacks the bytes, and only it can tell whether they are already on the way.

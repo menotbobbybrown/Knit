@@ -43,6 +43,8 @@ document:
 - A message sent while a photo was going to the same phone over Bluetooth could wait a minute or more, until
   the photo finished. Messages now arrive within a few seconds, but photos take longer, especially when
   several nearby phones download the same one.
+- When several photos were on their way to the same phone over Bluetooth, your phone could send one of them
+  two or three times, and messages waited behind every copy. It now sends each photo once.
 
 ## [2.8.0](https://github.com/getknit/knit/releases/tag/v2.8.0) — 2026-10-03T03:55:42Z
 

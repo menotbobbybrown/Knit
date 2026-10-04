@@ -595,6 +595,8 @@ class BluetoothMeshTransport(
 
     override fun arrivingFiles(): Map<String, ArrivingFile> = links.values.mapNotNull { it.rxFile }.furthestByKey()
 
+    override fun fileArrivingFrom(nodeId: String): Boolean = links[nodeId]?.rxInProgress ?: false
+
     override fun fileInFlightTo(
         nodeId: String,
         key: String,

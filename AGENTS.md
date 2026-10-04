@@ -344,7 +344,9 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   ADR 2026-09.4tx5 (and 2026-09.ptv8 for the database re-arm). A blob is served only to a fresh ask — nothing
   is pushed to a peer that did not just ask, there is no wanter set — and "is it on the way" is a read of the
   link, never a memo with a TTL: the receiver stays quiet for a hash whose header is in, the holder refuses a
-  re-ask for a key still queued or streaming to that peer. The lab pins it with `LabTransport.holdFiles` and
+  re-ask for a key still queued or streaming to that peer. The Bluetooth stack's buffer sits between those reads
+  (ADR 2026-10.nxfb, #121): the tick asks nothing of a peer whose file is streaming in (`fileArrivingFrom`), and a
+  file the link fed in full stays in flight while the link goes on feeding that peer. The lab pins it with `LabTransport.holdFiles` and
   the `files` recorder (one copy per (hash, link)). **Before touching `FramedLink.rxFile`, `ArrivingFile`,
   `FileHeaderWire.size`, `MeshController.arrivals` / `arrivalTicker`, `ChatViewModel.arrivals` or
   `ui/chat/ArrivalIndicator`:** READ ADR 2026-10.y9qh — the chat's progress ring is the same read of the link

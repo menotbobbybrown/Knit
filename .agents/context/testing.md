@@ -155,7 +155,10 @@ hop (fixed in `MeshRouter.countOverheard`, pinned by `MeshRouterTest`).
   Files have their own hold (`holdFiles(to)` / `heldFiles(to)` / `releaseFiles(to)`, ADR 2026-09.4tx5): a
   parked file is staged with its header across, so the receiver reports it in `arrivingFiles()` (at zero
   bytes, no total) and the sender in `fileInFlightTo` — the slow BLE transfer a scenario can hold a re-ask
-  against. Every `sendFile`
+  against. `stackFiles(to)` parks the next files fed but unseen — neither arriving nor in flight — the photo a
+  holder that cannot see its own stack has fed behind the one streaming in (ADR 2026-10.nxfb); arm `holdFiles`
+  first. `fileArrivingFrom` reads whether a held, arriving file from that peer is parked. `LabNode.reoffer()` runs
+  one 60 s re-offer round now, the tick a lab clock jump never wakes. Every `sendFile`
   is logged in `files` as `to kind key` (the phone's `file …` line: one copy per (hash, link)), and
   `digestsSent` names whom a node advertised its digest to — the newcomer batch's last hook, so a re-link
   "as the 60 s re-offer would" waits on it before asserting what the batch did not send. `sent` records the

@@ -319,6 +319,31 @@ class FramedLinkTest {
     }
 
     @Test
+    fun aFileFedWhileTheLinkGoesOnFeedingThePeerStaysPendingUntilTheLinkIsIdle() {
+        // #121: the stack's buffer drains in order, so a file fed ahead of one still streaming may not have reached the
+        // peer yet. The link keeps vouching for it until nothing is queued or streaming, and forgets it then.
+        val h = harness(fromLinkBuffer = 16 * 1024)
+        val first = "a".repeat(64)
+        val second = "b".repeat(64)
+        val third = "c".repeat(64)
+        val file = tmp.newFile("fed.bin").apply { writeBytes(ByteArray(80 * 1024)) }
+        assertTrue(h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, first, "image/jpeg")))
+        assertTrue(h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, second, "image/jpeg")))
+        assertEquals(LinkFraming.Type.FILE_HEADER, LinkFraming.read(h.fromLink)!!.type)
+        readFileBody(h.fromLink)
+        // The second header out means the first stream's bookkeeping is done: the writer runs one file at a time.
+        assertEquals(LinkFraming.Type.FILE_HEADER, LinkFraming.read(h.fromLink)!!.type)
+        assertTrue("fed, and the link is still feeding the peer", h.link.hasPendingFile(first))
+        assertTrue(h.link.hasPendingFile(second))
+
+        readFileBody(h.fromLink)
+        assertTrue("idle: neither is vouched for", awaitUntil { !h.link.hasPendingFile(first) && !h.link.hasPendingFile(second) })
+        assertTrue(h.link.sendFile(file, FileMeta(FileKind.ATTACHMENT, third, "image/jpeg")))
+        assertTrue(h.link.hasPendingFile(third))
+        assertFalse("a later busy spell does not bring an earlier one's files back", h.link.hasPendingFile(first))
+    }
+
+    @Test
     fun malformedBlobKeyRejectsFileWithoutCallback() {
         val h = harness()
         // A key that isn't a 64-hex blob hash must be rejected (path-traversal defense) and never finalized.

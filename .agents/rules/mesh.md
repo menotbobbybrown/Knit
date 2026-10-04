@@ -202,7 +202,10 @@ free). Two invariants that are easy to break:
   in, no `FILE_END` yet, off `FramedLink.rxKey`) keeps `want` and the tick's re-ask quiet for that hash,
   and `fileInFlightTo(peer, key)` (queued or streaming, counted from the enqueue) refuses a second copy on
   a re-ask whatever the 45 s memo says. A transfer's length is the receiver's controller's, so no constant
-  covers it. Don't add a `noteIncoming` memo or a wanter TTL back. The progress ring the chat draws is the
+  covers it. Don't add a `noteIncoming` memo or a wanter TTL back. The Bluetooth stack's buffer sits between
+  those two reads (ADR 2026-10.nxfb, #121): the tick does not re-ask a peer while a file from it streams in
+  (`fileArrivingFrom`, about the peer, not the hash), and `fileInFlightTo` also covers a file the link fed in
+  full while it goes on feeding that peer — never a TTL after the feed ends. The progress ring the chat draws is the
   same read (`arrivingFiles()` maps each key to the bytes in and the header's declared `size`, ADR
   2026-10.y9qh): that size is the sender's label, never a bound or a stall timer.
 - **A cut attachment resumes from the bytes the receiver kept** (`PartialBlobs`, `FileIntake`, ADR

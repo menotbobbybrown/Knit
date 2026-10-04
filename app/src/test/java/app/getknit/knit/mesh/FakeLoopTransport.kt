@@ -39,6 +39,9 @@ class FakeLoopTransport(
     /** `nodeId to key` pairs a test declares as queued or streaming toward that peer. */
     val inFlight = mutableSetOf<Pair<String, String>>()
 
+    /** Node ids a test declares as streaming a file in to us right now. */
+    val arrivingFrom = mutableSetOf<String>()
+
     /** What every [sendFile] that reached a peer asked of the link, offset included (#116), in order. */
     val filesSent = java.util.concurrent.CopyOnWriteArrayList<FileMeta>()
 
@@ -87,6 +90,8 @@ class FakeLoopTransport(
     }
 
     override fun arrivingFiles(): Map<String, ArrivingFile> = arriving.associateWith { ArrivingFile(it, bytes = 0, total = null) }
+
+    override fun fileArrivingFrom(nodeId: String): Boolean = nodeId in arrivingFrom
 
     override fun fileInFlightTo(
         nodeId: String,

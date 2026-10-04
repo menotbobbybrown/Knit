@@ -20,7 +20,10 @@ import app.getknit.knit.mesh.protocol.WireEnvelope
  *
  * A blob whose bytes are already streaming in on a link (a key of [MeshTransport.arrivingFiles]) is neither
  * wanted nor re-asked for; a re-ask for one already queued toward that peer ([MeshTransport.fileInFlightTo])
- * ships nothing. Both are reads of the link, not memos here — a torn link clears its own state.
+ * ships nothing. Both are reads of the link, not memos here — a torn link clears its own state. The Bluetooth
+ * stack's buffer sits between those two reads, so the tick does not re-ask a peer whose file is streaming in
+ * ([MeshTransport.fileArrivingFrom]), and a holder counts a fed file as in flight while its link goes on feeding
+ * that peer (#121).
  *
  * The `blobreq` that drives [onRequest] is **unsigned** (see `MeshManager.verifyInbound`), so, like
  * [KeyExchange]/[PendingInbound], the bookkeeping is **bounded**: [fetching] is capped (oldest-first
@@ -88,6 +91,11 @@ class BlobExchange(
     /**
      * A neighbor appeared, or the 60 s re-offer tick came round for one: re-ask it for everything we're still
      * missing (handles late-joining holders, and is the re-ask that makes the hop-by-hop walk move).
+     *
+     * Not while a file from [peer] is streaming in (#121). A link delivers in order, so whatever [peer] has already
+     * fed us sits behind that file in the stack's buffer, and a holder whose feed outpaces the drain can have fed a
+     * whole photo there: it no longer counts that serve as in flight, so an ask for it buys a second copy. Every
+     * serve [peer] would make now queues behind that stream anyway, and the first tick after it ends asks.
      */
     suspend fun onNeighborAdded(peer: Peer) {
         // Drop the marks whose bytes we have since obtained, then ask for the rest. [onReceived] clears its
@@ -109,7 +117,7 @@ class BlobExchange(
                         }
                     }
                 }.filterNot { it in arriving }
-        if (missing.isEmpty()) return
+        if (missing.isEmpty() || transport.fileArrivingFrom(peer.nodeId)) return
         val me = selfId()
         missing.forEach { hash -> transport.send(blobRequest(me, hash), peer) }
     }

@@ -405,6 +405,43 @@ class BlobExchangeTest {
         }
 
     @Test
+    fun theTickDoesNotReAskAPeerWhoseFileIsStreamingIn() =
+        runTest(UnconfinedTestDispatcher()) {
+            // #121: n is streaming us G and has already fed H into the stack's buffer behind it. H is not arriving and
+            // n no longer counts it in flight, so an ask now would buy a second copy. The other neighbour is asked.
+            val r = FakeLoopTransport("r")
+            val n = FakeLoopTransport("n")
+            val m = FakeLoopTransport("m")
+            val store = FakeBlobStore(Files.createTempDirectory("blob-busy").toFile())
+            val exchange =
+                BlobExchange(
+                    transport = r,
+                    store = store,
+                    selfId = { "r" },
+                    onObtained = { _, _ -> },
+                    now = { 0L },
+                    partials = partials(),
+                )
+            val askedOfN = backgroundScope.asksArrivingAt(n)
+            val askedOfM = backgroundScope.asksArrivingAt(m)
+
+            exchange.want("H") // nobody linked yet — marked, nothing sent
+            r.connect(n)
+            r.connect(m)
+            r.arriving += "G"
+            r.arrivingFrom += "n"
+            exchange.onNeighborAdded(Peer("n"))
+            exchange.onNeighborAdded(Peer("m"))
+            assertTrue("no ask to the peer streaming to us: $askedOfN", askedOfN.isEmpty())
+            assertEquals("the quiet neighbour is still asked", listOf("H" to null), askedOfM)
+
+            r.arriving.clear() // G landed, and H with it never came: the stream is over
+            r.arrivingFrom.clear()
+            exchange.onNeighborAdded(Peer("n"))
+            assertEquals("the first tick after the stream asks", listOf("H" to null), askedOfN)
+        }
+
+    @Test
     fun aReAskWhileTheCopyIsQueuedOnTheLinkShipsNothing() =
         runTest(UnconfinedTestDispatcher()) {
             // The memo is 45 s from the enqueue; a serve queued behind a multi-minute blob to the same peer,

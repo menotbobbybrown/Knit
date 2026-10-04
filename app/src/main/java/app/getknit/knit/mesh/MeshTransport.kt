@@ -364,10 +364,21 @@ interface MeshTransport {
     fun arrivingFiles(): Map<String, ArrivingFile> = emptyMap()
 
     /**
+     * True while a file from [nodeId] is streaming in on a live link: its `FILE_HEADER` is in and its `FILE_END` is
+     * not. A link delivers in order, so anything that peer has already fed us is behind this file in the stack's
+     * buffer. `BlobExchange` holds the 60 s re-ask to that peer until it is false: an ask for a blob still in the
+     * buffer finds the holder done feeding it, and buys a second copy (#121). Default false: a plane with no data
+     * path carries no files.
+     */
+    fun fileArrivingFrom(nodeId: String): Boolean = false
+
+    /**
      * True while a file under [key] is queued on, or streaming over, a live link toward [nodeId] — from the
-     * enqueue [sendFile] accepted to the end of the stream. Read by `BlobExchange.onRequest` so a re-ask
-     * (an older build's, or one whose serve is still queued behind a multi-minute blob to the same peer)
-     * never queues a second copy behind the first (#79). Default false.
+     * enqueue [sendFile] accepted to the end of the stream, and after it for as long as that link goes on
+     * feeding [nodeId] a later file, which the stack delivers behind it (#121). Read by `BlobExchange.onRequest`
+     * so a re-ask (an older build's, one whose serve is still queued behind a multi-minute blob to the same peer,
+     * or one that crossed the copy in the stack's buffer) never queues a second copy behind the first (#79).
+     * Default false.
      */
     fun fileInFlightTo(
         nodeId: String,

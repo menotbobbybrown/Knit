@@ -13,7 +13,10 @@ Status: Accepted (2026-09-19). Work item knit/knit-next#79, seen while verifying
 Point 1 amended by ADR 2026-10.y9qh (2026-10-03): `arrivingFiles()` is a map that also says how far each file
 has got, read off `FramedLink.rxFile`; `BlobExchange` still reads only its keys. Amended by ADR 2026-10.wtyc
 (2026-10-03): an ask names the bytes the asker kept from a cut transfer and the holder streams only the rest; a
-fresh ask is still what makes a serve, and the memo and the two link reads are unchanged.
+fresh ask is still what makes a serve, and the memo and the two link reads are unchanged. Points 1 and 2 amended by
+ADR 2026-10.nxfb (2026-10-03, #121): the Bluetooth stack's buffer sits between the two reads, so the tick does not
+re-ask a peer whose file is streaming in (`MeshTransport.fileArrivingFrom`), and `fileInFlightTo` also covers a file
+the link fed in full while it goes on feeding that peer.
 
 **What was observed.** 2026-09-19 20:43, three phones linked over BLE (P3, Moto G, P9), a 699 KB DM
 attachment P3 → Moto. It crossed the mesh three times to the Moto and twice to P9: P3 served the Moto at

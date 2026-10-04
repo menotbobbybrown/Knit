@@ -1119,6 +1119,9 @@ class LabNode internal constructor(
     /** Runs the TTL sweep the 10-minute prune loop and the heartbeat run (custody, parked frames, wants), now. */
     suspend fun sweepExpired() = manager.sweepExpired()
 
+    /** Runs one round of the 60 s re-offer to every linked neighbour (custody digest, blob and key re-asks), now. */
+    suspend fun reoffer() = manager.reofferToNeighbors()
+
     /** Sends a DM; the frame the app's composer would send. */
     suspend fun sendDm(
         to: LabNode,

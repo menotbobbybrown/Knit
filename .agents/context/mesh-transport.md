@@ -307,8 +307,11 @@ second full copy (field-verified: the late-NDP re-ask after a BLE fallback is re
 Since ADR 2026-09.4tx5 (#79) the link itself answers the two questions the memo could not: a receiver
 reads `MeshTransport.arrivingFiles()` (off `FramedLink.rxFile`) and does not ask for a blob whose header is
 already in, and a holder reads `fileInFlightTo(peer, key)` (the link's pending-file count, from the enqueue
-to the end of the stream) and refuses a re-ask for a copy still queued or streaming to that peer. Since ADR
-2026-10.y9qh (#115) that read is a map of each arriving key to the bytes in and the `size` the sender's
+to the end of the stream) and refuses a re-ask for a copy still queued or streaming to that peer. The stack's
+buffer sits between those two reads, and an overfed link holds a whole photo in it (ADR 2026-10.nxfb, #121): the
+tick asks nothing of a peer whose file is streaming in (`MeshTransport.fileArrivingFrom`, off
+`FramedLink.rxInProgress`), and `hasPendingFile` keeps a file the link fed in full while it goes on feeding that
+peer, so a re-ask crossing a copy still in the stack ships nothing. Since ADR 2026-10.y9qh (#115) that read is a map of each arriving key to the bytes in and the `size` the sender's
 `FILE_HEADER` declared, and the chat samples it (`MeshController.arrivals`, every 500 ms while anything
 streams in, 2 s otherwise, only while an attachment it shows is awaited) to draw a progress ring; the size is
 a label, never a bound. The receiver logs `rx <KIND>/<hash> <size|?>B ← <peer>` at the header and

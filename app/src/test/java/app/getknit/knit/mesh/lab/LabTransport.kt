@@ -228,6 +228,9 @@ class LabTransport(
         // null parks it with none, as [holdFiles] always has.
         var streamUntil: Long? = null
 
+        // With [holdingFiles], a file sent now parks fed but unseen ([stackFiles]): neither end reports it.
+        var stacking = false
+
         // Set by [disconnect] under the `heldFiles` lock: a stream begun on a pipe already torn down is cut at once.
         var closed = false
         val heldFiles = mutableListOf<HeldFile>()
@@ -235,23 +238,38 @@ class LabTransport(
         /** Parks [file] if this pipe is holding files; false means land it. One lock with [releaseFiles]. */
         fun parkFile(file: ReceivedFile): Boolean =
             synchronized(heldFiles) {
-                if (holdingFiles) heldFiles += HeldFile.Whole(file)
+                if (holdingFiles) heldFiles += if (stacking) HeldFile.Stacked(file) else HeldFile.Whole(file)
                 holdingFiles
             }
     }
 
-    /** A file parked on a pipe: one staged whole ([holdFiles]), or one streaming into the receiver's intake. */
+    /**
+     * A file parked on a pipe: one staged whole ([holdFiles]), one streaming into the receiver's intake, or one fed
+     * into the sender's stack and not yet seen by either end ([stackFiles]).
+     */
     private sealed interface HeldFile {
         val key: String
 
         /** What the receiver reports while it waits: nothing in yet, or the stream's real count. */
         val arriving: ArrivingFile?
 
+        /** Whether the sender still counts it as queued or streaming ([fileInFlightTo]). */
+        val inFlight: Boolean get() = true
+
         class Whole(
             val file: ReceivedFile,
         ) : HeldFile {
             override val key: String get() = file.key
             override val arriving: ArrivingFile get() = ArrivingFile(key, bytes = 0, total = null)
+        }
+
+        /** Fed in full and sitting in the sender's stack behind what is arriving: the sender is done with it (#121). */
+        class Stacked(
+            val file: ReceivedFile,
+        ) : HeldFile {
+            override val key: String get() = file.key
+            override val arriving: ArrivingFile? get() = null
+            override val inFlight: Boolean get() = false
         }
 
         class Streaming(
@@ -458,6 +476,23 @@ class LabTransport(
         synchronized(pipe.heldFiles) {
             pipe.holdingFiles = true
             pipe.streamUntil = null
+            pipe.stacking = false
+        }
+    }
+
+    /**
+     * From now on, a file this node sends [to] parks fed but unseen until [releaseFiles]: the receiver does not see it
+     * [arrivingFiles] and the sender no longer counts it [fileInFlightTo]. A holder whose feed outpaced the drain, so
+     * that a whole photo sits in its Bluetooth stack behind the one streaming in, as a holder that cannot see its own
+     * stack reads it (an older build, the iOS port). Arm [holdFiles] first, so something is arriving ahead of it, as
+     * the stack has it (#121).
+     */
+    fun stackFiles(to: LabTransport) {
+        val pipe = pipe(to)
+        synchronized(pipe.heldFiles) {
+            pipe.holdingFiles = true
+            pipe.streamUntil = null
+            pipe.stacking = true
         }
     }
 
@@ -476,6 +511,7 @@ class LabTransport(
         synchronized(pipe.heldFiles) {
             pipe.holdingFiles = true
             pipe.streamUntil = untilBytes
+            pipe.stacking = false
         }
     }
 
@@ -494,6 +530,7 @@ class LabTransport(
                         if (it.isEmpty()) {
                             pipe.holdingFiles = false
                             pipe.streamUntil = null
+                            pipe.stacking = false
                         }
                     }
                 }
@@ -502,6 +539,7 @@ class LabTransport(
                 val file =
                     when (held) {
                         is HeldFile.Whole -> held.file
+                        is HeldFile.Stacked -> held.file
                         is HeldFile.Streaming -> held.stream.land()
                     }
                 file?.let { pipe.target._incomingFiles.emit(it) }
@@ -520,11 +558,17 @@ class LabTransport(
                     ?: emptyList()
             }.furthestByKey()
 
+    /** A linked sender's file streaming in to this node: one parked toward us with its header across. */
+    override fun fileArrivingFrom(nodeId: String): Boolean {
+        val toMe = pipes[nodeId]?.target?.pipes?.get(this.nodeId) ?: return false
+        return synchronized(toMe.heldFiles) { toMe.heldFiles.any { it.arriving != null } }
+    }
+
     /** Queued on the link: a file parked toward [nodeId] under [key]. An unheld lab file lands at once. */
     override fun fileInFlightTo(
         nodeId: String,
         key: String,
-    ): Boolean = pipes[nodeId]?.let { p -> synchronized(p.heldFiles) { p.heldFiles.any { it.key == key } } } ?: false
+    ): Boolean = pipes[nodeId]?.let { p -> synchronized(p.heldFiles) { p.heldFiles.any { it.key == key && it.inFlight } } } ?: false
 
     /**
      * Delivers everything parked for [to], in the order [reorder] returns (default: as sent), and stops holding

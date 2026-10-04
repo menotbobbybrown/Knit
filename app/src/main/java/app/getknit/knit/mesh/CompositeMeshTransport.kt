@@ -284,6 +284,9 @@ class CompositeMeshTransport(
      */
     override fun arrivingFiles(): Map<String, ArrivingFile> = children.flatMap { it.arrivingFiles().values }.furthestByKey()
 
+    /** Any plane: a peer streaming to us on either link has fed us whatever sits behind that file. */
+    override fun fileArrivingFrom(nodeId: String): Boolean = children.any { it.fileArrivingFrom(nodeId) }
+
     /** Any plane: the serve went to whichever child held the link, and a re-ask must see it wherever it sits. */
     override fun fileInFlightTo(
         nodeId: String,

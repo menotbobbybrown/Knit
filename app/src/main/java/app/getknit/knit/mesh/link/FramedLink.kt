@@ -132,6 +132,13 @@ class FramedLink(
     private val pendingFileKeys = HashMap<String, Int>()
     private val pendingLock = Any()
 
+    // Keys whose stream this link finished feeding while it went on feeding this peer. The stack's buffer drains in
+    // order, so a file fed before the one still going is ahead of it there and may not have reached the peer yet:
+    // when the feed outpaces the drain a whole photo sits in it, and a re-ask crossing it bought a second copy (#121).
+    // Emptied when nothing is queued or streaming, the one point at which the link stops vouching for them. Guarded
+    // by [pendingLock].
+    private val fedWhileBusy = HashSet<String>()
+
     /** Starts the read + write loops. Stamps the quiescence window at link-up (a backfill will extend it). */
     fun start() {
         val t = now()
@@ -180,8 +187,14 @@ class FramedLink(
         return outbound.trySend(Outbound.FileSend(file, meta)).isSuccess.also { if (!it) notePending(meta.key, -1) }
     }
 
-    /** True while a file under [key] is queued on, or streaming over, this link. */
-    fun hasPendingFile(key: String): Boolean = synchronized(pendingLock) { pendingFileKeys.containsKey(key) }
+    /**
+     * True while a file under [key] is queued on, or streaming over, this link — or was fed in full while the link
+     * is still busy with a later file to this peer, which the stack delivers behind it (#121).
+     */
+    fun hasPendingFile(key: String): Boolean =
+        synchronized(pendingLock) {
+            pendingFileKeys.containsKey(key) || (key in fedWhileBusy && pendingFileKeys.isNotEmpty())
+        }
 
     private fun notePending(
         key: String,
@@ -189,6 +202,16 @@ class FramedLink(
     ) = synchronized(pendingLock) {
         val n = (pendingFileKeys[key] ?: 0) + delta
         if (n > 0) pendingFileKeys[key] = n else pendingFileKeys.remove(key)
+    }
+
+    /** [key]'s stream is over: [fed] when its end went to the socket. An idle link vouches for nothing it fed. */
+    private fun noteStreamed(
+        key: String,
+        fed: Boolean,
+    ) = synchronized(pendingLock) {
+        notePending(key, -1)
+        if (fed) fedWhileBusy += key
+        if (pendingFileKeys.isEmpty()) fedWhileBusy.clear()
     }
 
     fun close() {
@@ -199,7 +222,10 @@ class FramedLink(
             closed = true
             intake.cut() // an attachment cut mid-stream keeps its prefix for the next ask (#116)
         }
-        synchronized(pendingLock) { pendingFileKeys.clear() } // whatever was queued died with the link
+        synchronized(pendingLock) {
+            pendingFileKeys.clear() // whatever was queued died with the link
+            fedWhileBusy.clear()
+        }
         socket.close()
     }
 
@@ -341,6 +367,7 @@ class FramedLink(
         val meta = item.meta
         var cfg = PaceConfig() // read before every chunk below; the window rebases onto the first
         val window = PaceWindow(cfg, startedAt)
+        var fed = false // its end went to the socket
         try {
             // Opened before the header goes out: a source that has gone costs this one file, not the link, and the
             // offset is checked against the bytes actually there.
@@ -376,6 +403,7 @@ class FramedLink(
                 }
                 LinkFraming.write(out, LinkFraming.Type.FILE_END)
                 out.flush()
+                fed = true
                 touch()
                 if (offset > 0) metrics.onFileResumedOut()
                 // The per-plane feed evidence (this same codec runs over the NAN NDP and BLE L2CAP sockets), with the
@@ -387,7 +415,7 @@ class FramedLink(
             }
         } finally {
             txInProgress = false
-            notePending(meta.key, -1)
+            noteStreamed(meta.key, fed)
         }
     }
 

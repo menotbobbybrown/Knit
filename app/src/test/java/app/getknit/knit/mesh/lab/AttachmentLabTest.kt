@@ -360,6 +360,59 @@ class AttachmentLabTest {
             assertTrue("Bob never pushed Carol the copy she holds: $bobToCarol", bobToCarol.isEmpty())
         }
 
+    @Test
+    fun aPictureStillInTheHoldersStackIsNotAskedForAgainWhileTheOneAheadOfItStreamsIn() =
+        runBlocking {
+            // #121, the shape the P7 caught on 2026-10-03: Alice serves Bob two pictures, her feed outpaces his drain,
+            // and the second sits whole in her Bluetooth stack behind the first. Bob does not see it arriving, and
+            // Alice (a holder that cannot see her own stack) no longer counts it in flight. Bob's 60 s tick must not
+            // ask her for it again while the first is still streaming in from her.
+            val alice = lab.node("alice").apply { setDisplayName("Alice") }
+            val bob = lab.node("bob").apply { setDisplayName("Bob") }
+            lab.link(alice, bob)
+            lab.awaitAcquainted(alice, bob)
+            // Each end's link-up hooks have run (its digest goes out after its re-ask), so none of them asks below.
+            lab.await(1) {
+                if (alice.nodeId in bob.transport.digestsSent && bob.nodeId in alice.transport.digestsSent) 1 else 0
+            }
+
+            alice.transport.holdFiles(bob.transport) // the first picture's header is across, its bytes take their time
+            val first = Random(11).nextBytes(4_096)
+            assertTrue(alice.sendImage(first, "first for bob", to = bob))
+            val firstId = alice.ownMessageId(alice.dmWith(bob), "first for bob")
+            val firstHash = checkNotNull(alice.attachmentHash(alice.dmWith(bob), firstId))
+            lab.await(1) { alice.transport.heldFiles(bob.transport).count { it == firstHash } }
+
+            alice.transport.stackFiles(bob.transport) // the second is fed whole, behind it
+            val second = Random(12).nextBytes(4_096)
+            assertTrue(alice.sendImage(second, "second for bob", to = bob))
+            val secondId = alice.ownMessageId(alice.dmWith(bob), "second for bob")
+            val secondHash = checkNotNull(alice.attachmentHash(alice.dmWith(bob), secondId))
+            lab.await(1) { alice.transport.heldFiles(bob.transport).count { it == secondHash } }
+            assertTrue("the first is streaming in", firstHash in bob.transport.arrivingFiles())
+            assertFalse("the second is not seen arriving", secondHash in bob.transport.arrivingFiles())
+            assertFalse("nor counted in flight by its holder", alice.transport.fileInFlightTo(bob.nodeId, secondHash))
+            val asksBefore = bob.transport.blobAsks.count { it.hash == secondHash }
+            assertEquals("Bob asked for the second once, on hearing of it", 1, asksBefore)
+
+            // The serve memo runs from the enqueue, and a serve that waited behind the first has outlived it.
+            lab.clock.advance(BlobExchange.SERVE_MEMO_MS + 1_000)
+            bob.reoffer() // Bob's 60 s tick
+            assertEquals(
+                "no re-ask while the picture ahead of it streams in: ${bob.transport.blobAsks}",
+                asksBefore,
+                bob.transport.blobAsks.count { it.hash == secondHash },
+            )
+
+            alice.transport.releaseFiles(bob.transport) // both land, in order
+            lab.assertConverged(listOf(alice, bob), atLeast = 2) { it.dmWith(if (it === alice) bob else alice) }
+            assertTrue(first.contentEquals(bob.attachmentPlain(bob.dmWith(alice), firstId)))
+            assertTrue(second.contentEquals(bob.attachmentPlain(bob.dmWith(alice), secondId)))
+            listOf(firstHash, secondHash).forEach { hash ->
+                assertEquals("Alice served $hash once", 1, alice.transport.files.count { it == "${bob.nodeId} ATTACHMENT $hash" })
+            }
+        }
+
     private companion object {
         /** Past `BlobExchange.FETCH_TTL_MS` (30 min), well inside the 48 h a lab clock jump may span. */
         const val WANT_TTL_LAPSED_MS = 31 * 60_000L

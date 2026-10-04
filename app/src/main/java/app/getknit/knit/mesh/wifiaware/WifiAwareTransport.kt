@@ -1143,6 +1143,8 @@ class WifiAwareTransport(
 
     override fun arrivingFiles(): Map<String, ArrivingFile> = peers.values.mapNotNull { it.link.rxFile }.furthestByKey()
 
+    override fun fileArrivingFrom(nodeId: String): Boolean = peers[nodeId]?.link?.rxInProgress ?: false
+
     override fun fileInFlightTo(
         nodeId: String,
         key: String,
