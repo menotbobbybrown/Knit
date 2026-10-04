@@ -757,3 +757,37 @@ each other through it, a physical phone never can. The only route to real RF is
 - **BLE only.** No Wi-Fi Aware, so the composite transport runs BLE-only and NAN reports unavailable.
 - Test with an **unseeded** debug APK: a `-PseedDemo=true` build fakes its peers, so `debug.STATE` will
   cheerfully report a mesh that isn't there.
+
+## Real BLE from an emulator, with the HCI tapped (`emulator-hci-bridge.sh`)
+
+The other route. The dongle stays on the host, and the emulator's Bluetooth HAL is pointed at a Bumble bridge
+instead of netsim (`emulator -packet-streamer-endpoint localhost:8877`). So the app, the AOSP host stack and the
+controller are all real, and every HCI packet between them passes through `scripts/hci-bridge.py`. The
+controllers are knit-ios's two nRF52840 dongles (Zephyr `hci_usb`, `firmware/knit-hci`). Spiked 2026-10-04 on
+`Knit_Mesh_BT` and dongle B: the emulator joined the lab mesh, linked knit-peer on dongle A, and DMs crossed both
+ways.
+
+- **What it buys over passthrough and a phone:** no root image, no firmware push, no rebind. Also:
+  - a live btsnoop (`build/hci-bridge/latest/hci.btsnoop`, read with `btmon -r`) and a one-line-per-event log
+    (links, PHY, data length, parameters, every command the controller refused);
+  - faults armed at run time (`ctl refuse | cut | deafen`). `ctl refuse 0x2039 0x0d --param0 0x01 --count 0`
+    held for 45 s showed ADR 2026-10.9utz's keeper at +2.5, +5 and +10 s from the controller's side.
+- **Its first findings:**
+  - GD pauses and resumes every advertising set around each accept-list write (9utz's reading, live).
+  - Zephyr refuses a second accept-list dial while a link it dialed is up (`0x0b`). See the limits in the
+    script's docstring.
+- **The BR/EDR shim and the scan arbiter are load-bearing.** Without the shim, GD crash-loops on an LE-only
+  controller (`controller.cc:330 read_local_name_complete_handler`, then `btm_sec.cc` "only controllers with
+  SSP"). Without the arbiter, GD's dial-while-scanning gets Zephyr's `0x0c`, and the emulator never dials. Both
+  are in the script's docstring.
+- **The dongles are knit-ios's rig** (its `.agents/rules/devices.md`): A is knit-peer's default adapter, B its
+  second peer. While the bridge holds one, BlueZ has no such adapter. Check that no knit-ios run uses it, and
+  give it back with `down`, which resets the controller before letting go: a dongle released mid-stream wedged
+  until a replug on 2026-10-04.
+- **Pairing it with knit-peer** (knit-ios `.build/out/Products/Debug-linux-x86_64/knit-peer`, its own `--instance`)
+  is the phone-free cross-platform check. Give the peer an id above the emulator's (`keygen --above`), so the peer
+  dials and the one-dial limit never bites. Then `deny-link` every other node it hears, as `interop.py` does.
+- **The emulator still hears the lab phones and the iPhone** and links them like any node, so it pulls their
+  custody. Driving none of them, it needs no go-ahead.
+- **Don't `pkill -f` the bridge or the peer's feed from an agent shell.** The pattern matches the shell's own
+  command line and kills it. Use the pidfile.
