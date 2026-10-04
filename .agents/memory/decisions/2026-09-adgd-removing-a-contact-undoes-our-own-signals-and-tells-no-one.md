@@ -89,3 +89,9 @@ custodied frame with no message row, `MeshManager.replayCustodiedSeedDms`. The r
 `ContactUniverseTest` (standing ≡ `contactIds`), `IntroSyncTest`'s cancel cases, `MeshManagerTest`'s commons
 first-sighting cases, and `BlockAndRequestLabTest.aRemovedContactsNextDmIsARequestAndTheRemovalStaysInvisible`
 — the full oracle over a room after the removal, since custody, profiles and the session must not move.
+
+*Amended by ADR 2026-10.jbsa (2026-10-04): a launcher shortcut the user pinned by hand no longer stays
+working. It is disabled, so its tap says the chat is no longer on this phone, and enabled again if the
+conversation comes back. `forgetConversation` is no longer the only way a shortcut goes: every path that takes
+a thread out of the chat list reaches the shortcuts through `ConversationShortcutSync`'s pass, and a route or
+an inline Reply under a thread the list no longer offers opens the chat list or sends nothing.*

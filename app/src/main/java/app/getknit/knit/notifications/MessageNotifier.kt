@@ -6,7 +6,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.Typeface
 import android.os.Build
 import android.text.SpannableString
@@ -19,14 +18,11 @@ import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import androidx.core.content.LocusIdCompat
-import androidx.core.content.pm.ShortcutInfoCompat
-import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import app.getknit.knit.MainActivity
 import app.getknit.knit.R
 import app.getknit.knit.data.message.ConversationKind
 import app.getknit.knit.data.message.Conversations
-import app.getknit.knit.ui.theme.ThemePreferences
 
 /**
  * Builds and posts "new message" notifications, Signal-style: **one MessagingStyle notification per
@@ -46,16 +42,15 @@ import app.getknit.knit.ui.theme.ThemePreferences
  * messages are not notified, and opening it clears its already-posted notification(s). A Koin process
  * singleton; lives as long as MeshService keeps the process alive.
  */
-class MessageNotifier(
+class MessageNotifier internal constructor(
     private val context: Context,
-    // Only read by the avatar painter: whether the app is on the wallpaper palette, so the tile in the shade
-    // can be harmonized the way the one in the list is.
-    themePrefs: ThemePreferences,
+    // The conversation shortcuts every notification names (`setShortcutId`), and the avatar painter they share.
+    private val shortcuts: ConversationShortcuts,
 ) : Notifier {
     private val manager = NotificationManagerCompat.from(context)
 
     /** Every bitmap a notification shows — decoded photos and the generated fallbacks — lives in here. */
-    private val avatars = NotificationAvatars(context, themePrefs)
+    private val avatars get() = shortcuts.avatars
 
     /** The conversation currently on screen, or null when none is. */
     @Volatile
@@ -91,6 +86,9 @@ class MessageNotifier(
 
         /** A photo-less group's cluster; kept here so an inline reply's re-render draws it too. */
         var faces: List<NotifFace> = emptyList()
+
+        /** The [ConversationShortcuts.stamp] of the latest post or refresh, so a shortcut pass never acts on a newer one. */
+        var stamp = 0L
     }
 
     /** Immutable snapshot of a [ConvState] captured under the lock, so building/posting stays lock-free. */
@@ -146,6 +144,7 @@ class MessageNotifier(
                 state.title = conversation.title
                 state.avatarBytes = conversation.avatarBytes
                 state.faces = conversation.faces
+                state.stamp = shortcuts.stamp()
                 state.count += 1
                 renderOf(state, state.history.add(incoming))
             }
@@ -310,9 +309,35 @@ class MessageNotifier(
 
     override fun forgetConversation(conversationId: String) {
         clearConversation(conversationId)
-        // The shortcut is keyed by the conversation id ([pushConversationShortcut]); removing the
-        // long-lived one takes the dynamic entry and the system's cached copy with it.
-        runCatching { ShortcutManagerCompat.removeLongLivedShortcuts(context, listOf(conversationId)) }
+        // The shortcut is keyed by the conversation id: removing the long-lived one takes the dynamic entry and the
+        // system's cached copy with it, and a copy pinned to the home screen is disabled (ADR 2026-10.jbsa).
+        shortcuts.forget(listOf(conversationId))
+    }
+
+    override fun retainConversations(
+        offered: Set<String>,
+        refreshed: Map<String, NotifConversation>,
+        since: Long,
+    ) {
+        val cleared = ArrayList<String>()
+        synchronized(states) {
+            // A post after the pass read its inputs is newer than anything the pass knows: it stays as posted.
+            for (state in states.values.filter { it.stamp <= since }) {
+                val face = refreshed[state.conversationId]
+                if (state.conversationId !in offered) {
+                    cleared += state.conversationId
+                } else if (face != null) {
+                    // What the next re-render (an inline reply's echo, a Mark read) draws; the posted notification
+                    // keeps its face until then — re-posting it for a new photo would be a post the user did not cause.
+                    state.title = face.title
+                    state.avatarBytes = face.avatarBytes
+                    state.faces = face.faces
+                }
+            }
+        }
+        // Cancelled outside the lock, as Mark read does: a gone conversation's lines would offer a Reply to a thread
+        // that is no longer there.
+        cleared.distinct().forEach(::clearConversation)
     }
 
     override fun onDismissed(tag: String) {
@@ -389,8 +414,9 @@ class MessageNotifier(
         // notification at it — that gives the Signal-style avatar in the collapsed, group-child, and heads-up
         // views (Conversations section).
         val title = displayTitle(r.kind, r.title)
-        val avatar = avatars.bitmapFor(r.avatarBytes) ?: avatars.fallbackAvatar(r.kind, title, key = r.conversationId, faces = r.faces)
-        pushConversationShortcut(r.conversationId, title, avatar)
+        val conversation = NotifConversation(r.conversationId, r.title, r.avatarBytes, r.kind, r.faces)
+        val avatar = shortcuts.avatarOf(conversation, title)
+        shortcuts.push(conversation, title, avatar)
 
         val channelId = if (r.isMention) NotificationChannels.MENTIONS else NotificationChannels.channelFor(r.kind)
         val builder =
@@ -415,44 +441,6 @@ class MessageNotifier(
                 .setOnlyAlertOnce(true)
 
         postNotification(r.tag, ID_MESSAGE, builder.build())
-    }
-
-    /**
-     * Publishes (or refreshes) a long-lived dynamic shortcut for [conversationId] carrying the conversation
-     * [avatar] + [title] and a deep-link to the thread. A MessagingStyle notification that references this
-     * via `setShortcutId` gets the Android "conversation" treatment: the shortcut icon renders as the
-     * prominent avatar in every view (collapsed / group-child / heads-up), which a bare `setLargeIcon`
-     * doesn't achieve. Also feeds the launcher long-press / share-sheet with recent conversations.
-     * ShortcutManagerCompat LRU-evicts once over the per-app cap, so this stays bounded.
-     */
-    private fun pushConversationShortcut(
-        conversationId: String,
-        title: String,
-        avatar: Bitmap,
-    ) {
-        val icon = IconCompat.createWithAdaptiveBitmap(avatar)
-        val person =
-            Person
-                .Builder()
-                .setKey(conversationId)
-                .setName(title)
-                .setIcon(icon)
-                .build()
-        val intent =
-            Intent(context, MainActivity::class.java)
-                .setAction(Intent.ACTION_VIEW)
-                .putExtra(MainActivity.EXTRA_ROUTE, "chat/$conversationId")
-        val shortcut =
-            ShortcutInfoCompat
-                .Builder(context, conversationId)
-                .setShortLabel(title.ifBlank { context.getString(R.string.app_name) })
-                .setLongLived(true)
-                .setIcon(icon)
-                .setPerson(person)
-                .setLocusId(LocusIdCompat(conversationId))
-                .setIntent(intent)
-                .build()
-        runCatching { ShortcutManagerCompat.pushDynamicShortcut(context, shortcut) }
     }
 
     /**
@@ -571,18 +559,11 @@ class MessageNotifier(
             .build()
     }
 
-    /** The real conversation title for all kinds (used for the shortcut label + avatar initial). */
+    /** The real conversation title for all kinds (the shortcut's label, the avatar's initial, the summary line). */
     private fun displayTitle(
         kind: ConversationKind,
         title: String?,
-    ): String =
-        title?.takeIf { it.isNotBlank() } ?: when (kind) {
-            ConversationKind.NEARBY -> context.getString(R.string.notif_title_nearby)
-            ConversationKind.MESHTASTIC -> context.getString(R.string.notif_title_meshtastic)
-            ConversationKind.COMMONS -> context.getString(R.string.commons_title)
-            ConversationKind.GROUP -> context.getString(R.string.group_unnamed)
-            ConversationKind.DM -> "?"
-        }
+    ): String = shortcuts.titleOf(kind, title)
 
     /** Deep-link tap: opens (or brings forward) [MainActivity] straight to `chat/<conversationId>`. */
     private fun openChatIntent(

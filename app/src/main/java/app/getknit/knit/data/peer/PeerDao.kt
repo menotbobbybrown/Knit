@@ -27,6 +27,10 @@ interface PeerDao {
     @Query("SELECT nodeId, name FROM peers")
     suspend fun namesAll(): List<PeerName>
 
+    /** The faces of [ids] alone — primary-key seeks, however many peers the table holds. */
+    @Query("SELECT nodeId, name, avatarHash FROM peers WHERE nodeId IN (:ids)")
+    fun observeFaces(ids: Collection<String>): Flow<List<PeerFace>>
+
     @Query("UPDATE peers SET verified = :verified WHERE nodeId = :nodeId")
     suspend fun setVerified(
         nodeId: String,

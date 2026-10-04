@@ -21,16 +21,12 @@ import app.getknit.knit.data.message.DeliveryPlane
 import app.getknit.knit.data.message.MentionStore
 import app.getknit.knit.data.message.MessageEntity
 import app.getknit.knit.data.message.StatusNotices
-import app.getknit.knit.data.message.groupFaceIds
-import app.getknit.knit.data.message.groupTitle
 import app.getknit.knit.data.message.withReply
 import app.getknit.knit.data.peer.PeerEntity
 import app.getknit.knit.data.reaction.ReactionEntity
 import app.getknit.knit.data.settings.InboundSettings
 import app.getknit.knit.identity.IdentitySource
 import app.getknit.knit.identity.NodeId
-import app.getknit.knit.identity.PeerLabelIndex
-import app.getknit.knit.identity.displayNameFor
 import app.getknit.knit.isValidReactionEmoji
 import app.getknit.knit.location.GeoUri
 import app.getknit.knit.mesh.crypto.AesGcm
@@ -76,8 +72,7 @@ import app.getknit.knit.mesh.protocol.isStorable
 import app.getknit.knit.mesh.protocol.mention
 import app.getknit.knit.mesh.spool.ScopeSync
 import app.getknit.knit.moderation.ImageScreeningService
-import app.getknit.knit.notifications.NotifConversation
-import app.getknit.knit.notifications.NotifFace
+import app.getknit.knit.notifications.ConversationFaces
 import app.getknit.knit.notifications.Notifier
 import app.getknit.knit.notifications.incomingNotification
 import app.getknit.knit.notifications.mentionNotification
@@ -203,6 +198,10 @@ class InboundPipeline(
     private val noteVerified: suspend (WireEnvelope, RelayEnvelope, fromNodeId: String, TransportKind) -> Unit =
         { _, _, _, _ -> },
 ) {
+    // The title and avatar a notification wears, resolved from the conversation alone — the resolver the
+    // conversation shortcuts share, so a refreshed shortcut and the next notification agree (ADR 2026-10.jbsa).
+    private val conversationFaces = ConversationFaces(groups, peers, blobs, commonsTitle)
+
     // nodeId -> avatar hash a non-direct peer advertised but whose bytes we're still pulling, so a blob
     // arriving via the multi-hop BlobExchange can be attributed back to the peer that advertised it.
     private val advertisedAvatars = ConcurrentHashMap<String, String>()
@@ -2868,7 +2867,7 @@ class InboundPipeline(
                 peerAvatarBytes = if (speaker != null) speaker.avatar else peerAvatar,
                 conversationId = conversationId,
             ) ?: return
-        val conversation = resolveConversation(conversationId, env.senderId, senderLabel.text, peerAvatar, me, labels)
+        val conversation = conversationFaces.resolve(conversationId, me, labels)
         val selfAvatar = settings.ownAvatarHash.first()?.let { blobs.bytes(it) }
         notifier.notify(incoming, conversation, me, settings.displayName.first(), selfAvatar)
     }
@@ -2954,77 +2953,10 @@ class InboundPipeline(
                 peerAvatarBytes = peerAvatar,
                 conversationId = conversationId,
             ) ?: return
-        val conversation = resolveConversation(conversationId, env.senderId, senderLabel.text, peerAvatar, me, labels)
+        val conversation = conversationFaces.resolve(conversationId, me, labels)
         val selfAvatar = settings.ownAvatarHash.first()?.let { blobs.bytes(it) }
         notifier.notifyMention(incoming, conversation, me, settings.displayName.first(), selfAvatar)
     }
-
-    /**
-     * Resolves the conversation-level title + avatar a Signal-style notification shows (the group photo /
-     * DM peer avatar as its large icon, the real thread name as its title). A DM uses the sender's
-     * name/avatar; a group looks up its stored name/photo (falling back to member names via [groupTitle],
-     * resolved through [labels] so two same-named members read apart), and without a photo carries the
-     * members the shade draws as a cluster — [groupFaceIds]'s pick, the same one the chat list makes, with
-     * each face's avatar bytes (ADR 2026-09.zapp); the Nearby room leaves both null so [notifier]
-     * substitutes its own defaults.
-     */
-    private suspend fun resolveConversation(
-        conversationId: String,
-        senderId: String,
-        dmName: String?,
-        dmAvatar: ByteArray?,
-        me: String,
-        labels: PeerLabelIndex,
-    ): NotifConversation =
-        when (Conversations.kindFor(conversationId)) {
-            ConversationKind.NEARBY -> {
-                NotifConversation(conversationId, null, null, ConversationKind.NEARBY)
-            }
-
-            // Like the Nearby room: both null, so the notifier substitutes the room's own title and glyph.
-            // Deliberately NOT the speaker's name and avatar — a bridged author has neither an avatar nor an
-            // authenticated name, and putting an unverified one in a notification title is the one place it
-            // would read as a person Knit vouches for.
-            ConversationKind.MESHTASTIC -> {
-                NotifConversation(conversationId, null, null, ConversationKind.MESHTASTIC)
-            }
-
-            // A room too: the relay's advertised name as the title (the notifier's generic one when the
-            // operator set none), the room glyph, and never the speaker as the conversation.
-            ConversationKind.COMMONS -> {
-                NotifConversation(conversationId, commonsTitle(conversationId), null, ConversationKind.COMMONS)
-            }
-
-            ConversationKind.DM -> {
-                NotifConversation(conversationId, displayNameFor(dmName, senderId), dmAvatar, ConversationKind.DM)
-            }
-
-            ConversationKind.GROUP -> {
-                val group = groups.find(conversationId)
-                val memberIds = group?.let { GroupMembersStore.decode(it.members) }.orEmpty()
-                // Pre-resolve member names off the index (one query, not one per member), since
-                // groupTitle's nameOf is non-suspend.
-                val namesByNode = LinkedHashMap<String, String>()
-                for (id in memberIds) namesByNode[id] = labels.labelFor(id).text
-                val title =
-                    group?.let {
-                        groupTitle(it.name, memberIds, me, fallback = "") { id -> namesByNode[id] ?: id }.ifBlank { null }
-                    }
-                val photo = group?.photoShownHash?.let { blobs.bytes(it) }
-                // Only a photo-less group draws its members, so the reads (at most four peer rows and four
-                // blobs) are skipped when a photo will cover them. The order is groupFaceIds's; the shade
-                // places faces in cells as given.
-                val faces =
-                    if (photo != null) {
-                        emptyList()
-                    } else {
-                        groupFaceIds(memberIds, me).map { id ->
-                            NotifFace(id, namesByNode[id] ?: id, peers.find(id)?.avatarHash?.let { blobs.bytes(it) })
-                        }
-                    }
-                NotifConversation(conversationId, title, photo, ConversationKind.GROUP, faces)
-            }
-        }
 
     /**
      * Pins an inbound peer's profile (self-cert check → last-writer-wins → immutable-pin guard → upsert),

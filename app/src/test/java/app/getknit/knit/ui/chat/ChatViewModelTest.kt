@@ -946,6 +946,26 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun aGroupThreadWhoseRowIsGoneNeverSendsAsADm() =
+        runTest {
+            // Deleted from the chat list, then opened by a stale shortcut: with no row the thread reads as a peer's,
+            // and `sendChat` would file the text under the group id as a pending-key DM to a node that does not exist.
+            coEvery { groups.find(GONE_GROUP) } returns null
+            val vm = vm(GONE_GROUP)
+            val events = mutableListOf<Int>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.state.collect {} }
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.events.collect { events += it } }
+            advanceUntilIdle()
+
+            vm.send("anyone still here?")
+            advanceUntilIdle()
+
+            assertTrue(mesh.sentChats.isEmpty())
+            assertEquals(listOf(R.string.chat_gone), events)
+            assertFalse("the guard is released, the draft is the user's", vm.isSending.value)
+        }
+
+    @Test
     fun theBridgedRoomNeverSendsATypingCue() =
         runTest {
             // There is nobody on the far side to show one to, and `sendTyping` has no arm for this room —
@@ -2129,6 +2149,7 @@ class ChatViewModelTest {
 
     private companion object {
         const val GROUP = "g-trailhead"
+        const val GONE_GROUP = "g-deleted"
     }
 
     /**

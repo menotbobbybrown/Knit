@@ -55,15 +55,21 @@ import app.getknit.knit.mesh.ForwardStore
 import app.getknit.knit.mesh.crypto.MessageCrypto
 import app.getknit.knit.mesh.crypto.ratchet.GroupRatchetStore
 import app.getknit.knit.mesh.crypto.ratchet.RatchetStore
+import app.getknit.knit.mesh.lora.LoraStatusRepository
 import app.getknit.knit.mesh.spool.CommonsStore
 import app.getknit.knit.mesh.spool.GroupRootStore
 import app.getknit.knit.moderation.ImageScreeningService
 import app.getknit.knit.moderation.ScopedTextModerator
 import app.getknit.knit.net.AndroidInternetGate
 import app.getknit.knit.net.InternetGate
+import app.getknit.knit.notifications.ConversationFaces
+import app.getknit.knit.notifications.ConversationGate
+import app.getknit.knit.notifications.ConversationShortcutSync
+import app.getknit.knit.notifications.ConversationShortcuts
 import app.getknit.knit.notifications.MessageNotifier
 import app.getknit.knit.notifications.Notifier
 import app.getknit.knit.review.ReviewPrompter
+import app.getknit.knit.ui.OfferedConversations
 import app.getknit.knit.ui.RouteInbox
 import app.getknit.knit.ui.addcontact.ContactCardInbox
 import app.getknit.knit.ui.relay.RelayInviteInbox
@@ -144,7 +150,34 @@ val appModule =
         // One voice player for the whole app: any number of voice-note bubbles can be on screen, and
         // starting one note has to stop whichever was playing. Owns its own scope (see VoicePlayer).
         single { VoicePlayer(androidContext(), get()) }
+        // The conversation shortcuts every message notification names, kept inside the chat list's universe by
+        // one sync (ADR 2026-10.jbsa). The sync's inputs are lazy: a phone with no shortcut never opens the
+        // database for it, and MainActivity resolves the sync on the main thread.
+        single { ConversationShortcuts(androidContext(), get()) }
         single<Notifier> { MessageNotifier(androidContext(), get()) }
+        single { ConversationFaces(get(), get(), get(), commonsTitle = { get<CommonsRepository>().find(it)?.name }) }
+        single {
+            OfferedConversations(
+                androidContext(),
+                get(),
+                get(),
+                get(),
+                get(),
+                get<Identity>(),
+                get<LoraStatusRepository>().facts,
+                get<CommonsRepository>(),
+            )
+        }
+        single {
+            ConversationShortcutSync(
+                shortcuts = get(),
+                notifier = get(),
+                scope = get(),
+                offered = lazy { get<OfferedConversations>() },
+                faces = lazy { get<ConversationFaces>() },
+            )
+        }
+        single<ConversationGate> { get<ConversationShortcutSync>() }
         // Single-shot handoff for content arriving via the system share sheet (ACTION_SEND).
         single { ShareInbox() }
         // Debug trailer seam driving the real Nearby composer (see DemoComposer). Inert in every build

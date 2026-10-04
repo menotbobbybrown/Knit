@@ -14,6 +14,7 @@ import app.getknit.knit.di.moderationModule
 import app.getknit.knit.di.seedDemoIfEnabled
 import app.getknit.knit.di.startDemoDirectorIfEnabled
 import app.getknit.knit.di.uiModule
+import app.getknit.knit.notifications.ConversationShortcutSync
 import app.getknit.knit.notifications.Notifier
 import app.getknit.knit.transfer.DirectWifi
 import app.getknit.knit.ui.backup.RestartActivity
@@ -92,6 +93,15 @@ class KnitApplication :
         koinApp.koin.get<CoroutineScope>().launch {
             delay(SWEEP_DELAY_MS)
             runCatching { koinApp.koin.get<DirectWifi>().sweep() }
+        }
+
+        // Keep the conversation shortcuts inside the chat list's universe (ADR 2026-10.jbsa): the first pass cleans
+        // up what an older build left (a deleted or blocked chat still in the launcher's long-press menu), then the
+        // sync watches for faces that change while the app is away. Held back past the cold start; a phone with no
+        // shortcut opens nothing for it.
+        koinApp.koin.get<CoroutineScope>().launch {
+            delay(ConversationShortcutSync.START_DELAY_MS)
+            koinApp.koin.get<ConversationShortcutSync>().start()
         }
 
         // Demo-screenshot mode (`-PseedDemo=true`): fill the DB with a realistic conversation history so

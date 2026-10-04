@@ -18,6 +18,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import app.getknit.knit.notifications.ConversationShortcutSync
 import app.getknit.knit.ui.KnitApp
 import app.getknit.knit.ui.RouteInbox
 import app.getknit.knit.ui.StorageGate
@@ -55,6 +56,9 @@ class MainActivity : ComponentActivity() {
 
     // Opens the database and the identity off the main thread before KnitApp composes (ADR 2026-10.47rw).
     private val storageGate: StorageGate by inject()
+
+    // Keeps the launcher's conversation shortcuts inside the chat list's universe (ADR 2026-10.jbsa).
+    private val shortcutSync: ConversationShortcutSync by inject()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -206,6 +210,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // Leaving the app is when the launcher can show its long-press menu again, so every removal made in here — a
+    // deleted chat, a block, a left group — reaches the conversation shortcuts now. A rotation is not leaving.
+    override fun onStop() {
+        super.onStop()
+        if (!isChangingConfigurations) shortcutSync.requestPass()
     }
 
     // Share into an already-running instance (launchMode=singleTask). Re-stage into the inbox; KnitApp

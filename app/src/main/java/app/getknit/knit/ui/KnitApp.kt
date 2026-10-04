@@ -1,6 +1,7 @@
 package app.getknit.knit.ui
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.fadeIn
@@ -31,6 +32,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.getknit.knit.BuildConfig
+import app.getknit.knit.R
 import app.getknit.knit.data.message.Conversations
 import app.getknit.knit.data.settings.SettingsStore
 import app.getknit.knit.legal.License
@@ -38,6 +40,7 @@ import app.getknit.knit.mesh.MeshController
 import app.getknit.knit.mesh.MeshService
 import app.getknit.knit.mesh.MeshStartGate
 import app.getknit.knit.moderation.MlTextModerator
+import app.getknit.knit.notifications.ConversationGate
 import app.getknit.knit.review.ReviewPrompter
 import app.getknit.knit.ui.about.AboutScreen
 import app.getknit.knit.ui.about.LicenseTextScreen
@@ -151,6 +154,7 @@ fun KnitApp(startRoute: String? = null) {
     val pendingShare by shareInbox.pending.collectAsStateWithLifecycle()
     val routeInbox = koinInject<RouteInbox>()
     val pendingRoute by routeInbox.pending.collectAsStateWithLifecycle()
+    val conversationGate = koinInject<ConversationGate>()
     val contactCardInbox = koinInject<ContactCardInbox>()
     val pendingCard by contactCardInbox.pending.collectAsStateWithLifecycle()
     val relayInviteInbox = koinInject<RelayInviteInbox>()
@@ -260,6 +264,17 @@ fun KnitApp(startRoute: String? = null) {
         val route = pendingRoute ?: return@LaunchedEffect
         if (!onboarded) {
             routeInbox.clear()
+            return@LaunchedEffect
+        }
+        // A shortcut, pinned or in the launcher's menu, and a notification left in the shade can outlive their
+        // thread: a deleted chat, a blocked peer, a left group. Opening one would show an empty thread with a live
+        // composer, where one message makes a removed contact a contact again or rejoins a left group (GitHub #33).
+        // It lands on the chat list instead, with a word on why (ADR 2026-10.jbsa).
+        val conversation = RouteInbox.conversationOf(route)
+        if (conversation != null && !conversationGate.isOffered(conversation)) {
+            routeInbox.consume()
+            navController.popBackStack(Routes.CHAT_LIST, inclusive = false)
+            Toast.makeText(context, R.string.chat_gone, Toast.LENGTH_SHORT).show()
             return@LaunchedEffect
         }
         val current = navController.currentBackStackEntry

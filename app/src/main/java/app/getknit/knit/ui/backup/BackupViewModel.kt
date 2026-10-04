@@ -6,7 +6,6 @@ import android.net.Uri
 import android.provider.DocumentsContract
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.getknit.knit.data.backup.BackupException
@@ -16,6 +15,7 @@ import app.getknit.knit.data.backup.BackupProblem
 import app.getknit.knit.data.backup.BackupWriter
 import app.getknit.knit.data.backup.RestoreStager
 import app.getknit.knit.mesh.MeshService
+import app.getknit.knit.notifications.ConversationShortcuts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -200,14 +200,7 @@ class BackupViewModel(
         // decide that. A plain stopService clears the sticky restart without writing anything.
         context.stopService(Intent(context, MeshService::class.java))
         NotificationManagerCompat.from(context).cancelAll()
-        runCatching {
-            val flags =
-                ShortcutManagerCompat.FLAG_MATCH_DYNAMIC or ShortcutManagerCompat.FLAG_MATCH_CACHED or
-                    ShortcutManagerCompat.FLAG_MATCH_PINNED
-            val ids = ShortcutManagerCompat.getShortcuts(context, flags).map { it.id }
-            ShortcutManagerCompat.removeAllDynamicShortcuts(context)
-            if (ids.isNotEmpty()) ShortcutManagerCompat.removeLongLivedShortcuts(context, ids)
-        }
+        ConversationShortcuts.wipeAll(context)
         RestartActivity.relaunch(context)
     }
 

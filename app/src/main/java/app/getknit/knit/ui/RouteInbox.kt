@@ -29,4 +29,17 @@ class RouteInbox {
     fun clear() {
         _pending.value = null
     }
+
+    companion object {
+        /**
+         * The conversation a thread route opens (`chat/<id>`, with or without its query), or null for any other route —
+         * the id `KnitApp` asks the conversation gate about before it opens a thread from outside (ADR 2026-10.jbsa).
+         */
+        fun conversationOf(route: String): String? =
+            route
+                .takeIf { it.startsWith("chat/") }
+                ?.removePrefix("chat/")
+                ?.substringBefore('?')
+                ?.takeIf { it.isNotBlank() }
+    }
 }

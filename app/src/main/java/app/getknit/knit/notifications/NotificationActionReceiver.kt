@@ -42,6 +42,7 @@ class NotificationActionReceiver :
     private val identity: Identity by inject()
     private val blobs: BlobRepository by inject()
     private val notifier: Notifier by inject()
+    private val gate: ConversationGate by inject()
     private val scope: CoroutineScope by inject()
 
     override fun onReceive(
@@ -90,6 +91,14 @@ class NotificationActionReceiver :
                 .orEmpty()
         val conv = intent.getStringExtra(MessageNotifier.EXTRA_CONV) ?: return
         val tag = intent.getStringExtra(MessageNotifier.EXTRA_TAG) ?: conv
+        // A notification can outlive its thread: a peer blocked, a group or commons left, a chat deleted while it sat
+        // in the shade. A reply there would message a blocked peer, rejoin a left group by our own signed frame, or
+        // bring a deleted thread back, so it sends nothing and the notification goes with its thread (ADR 2026-10.jbsa).
+        if (!gate.isOffered(conv)) {
+            Log.i(TAG, "reply under a conversation no longer offered — dropped")
+            notifier.clearConversation(conv)
+            return
+        }
         // An empty reply still re-posts the notification (with a blank echo) to clear its "sending" spinner.
         if (text.isNotBlank()) {
             // Route exactly as ChatViewModel.send / DebugBridgeReceiver.handleSend, by the conversation kind.

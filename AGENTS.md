@@ -464,6 +464,18 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   row, the session, custody or the block list; nothing is sent. A group co-member stays a contact (only
   their own leave shrinks a roster), and a commons member is accepted on first sighting only. Regression:
   `ContactRemoverTest`, `ContactUniverseTest`, `BlockAndRequestLabTest`.
+- **When touching `notifications/ConversationShortcuts`, `ConversationShortcutSync`, `ConversationFaces`,
+  `ui/OfferedConversations`, `Notifier.retainConversations`, the `ConversationGate` checks in `KnitApp` /
+  `NotificationActionReceiver`, or anything that publishes, removes or opens a conversation shortcut:** READ
+  ADR 2026-10.jbsa. The launcher's conversation shortcuts are derived from the chat list's universe
+  (`visibleConversations`), never hooked per removal path: a pass removes a gone thread's live copy, disables
+  a pinned one, enables one that came back and refreshes a changed face by the fingerprint in its extras — and
+  never creates one (only a notification's push does; a push stamped after the pass read its inputs wins). The
+  messages table is read inside a pass, never watched, and the peer and group tables only for the shortcuts'
+  own rows (`ShortcutWatch`, `IN (:ids)`) — never `observeDirectory`, which every profile frame re-runs. A
+  route or an inline Reply under a thread the list no longer offers opens the chat list or sends nothing.
+  Robolectric's shortcut shadow drops `removeLongLivedShortcuts`: test on `FakeShortcutStore`. Regression:
+  `ConversationShortcutSyncTest`, `ConversationShortcutsPlanTest`.
 - **When touching relay invites — `getknit.app/r` / `knit://r`, `mesh/spool/RelayInvite`,
   `data/relay/RelayInviteApplier`, `ui/relay/RelayInviteSheet` / `RelayInviteInbox`, the relay row's
   Share / Copy, or the Add-contact preview's relay "Add":** READ `docs/RELAY_INVITE.md` (layout, the

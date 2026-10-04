@@ -2,6 +2,7 @@ package app.getknit.knit.data
 
 import app.getknit.knit.data.peer.PeerDao
 import app.getknit.knit.data.peer.PeerEntity
+import app.getknit.knit.data.peer.PeerFace
 import app.getknit.knit.data.settings.InboundSettings
 import app.getknit.knit.identity.IdentitySource
 import app.getknit.knit.identity.PeerLabelIndex
@@ -12,6 +13,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Single source of truth for cached peer profiles. [profile] and [identity] contribute this device's own
@@ -40,6 +42,13 @@ class PeerRepository(
         ) { peers, myName, me ->
             PeerDirectory(peers, PeerLabels.index(peers.map { it.nodeId to it.name }, me to myName))
         }
+
+    /**
+     * The name and avatar of [ids] alone, as they change — the conversation-shortcut watch's read (ADR 2026-10.jbsa),
+     * which must not pay [observeDirectory]'s whole-table read and label rebuild on every profile frame. An empty set
+     * is answered without a query, so nothing subscribes to the peers table for it.
+     */
+    fun observeFaces(ids: Set<String>): Flow<List<PeerFace>> = if (ids.isEmpty()) flowOf(emptyList()) else dao.observeFaces(ids)
 
     /** A one-shot [PeerLabelIndex] for a suspend path (a notification, a contact-card preview). */
     suspend fun labelIndex(): PeerLabelIndex =

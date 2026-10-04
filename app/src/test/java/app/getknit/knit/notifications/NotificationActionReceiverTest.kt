@@ -57,6 +57,9 @@ class NotificationActionReceiverTest {
         }
     private val identity = mockk<Identity> { coEvery { nodeId() } returns ME }
 
+    /** The conversations the chat list no longer offers — a blocked peer, a left group (ADR 2026-10.jbsa). */
+    private val gone = mutableSetOf<String>()
+
     @Before
     fun setUp() {
         coEvery { groups.find(any()) } returns null
@@ -72,6 +75,7 @@ class NotificationActionReceiverTest {
                     single { identity }
                     single { mockk<BlobRepository>(relaxed = true) }
                     single { notifier }
+                    single<ConversationGate> { ConversationGate { it !in gone } }
                     single<CoroutineScope> { CoroutineScope(SupervisorJob() + Dispatchers.Unconfined) }
                 },
             )
@@ -125,6 +129,25 @@ class NotificationActionReceiverTest {
         coVerify(exactly = 0) { mesh.sendChat(any(), any(), any(), any(), any(), any()) }
         // The echo still clears the notification's "sending" state.
         verify { notifier.onReplied(any(), "hello?", ME, "Me", null) }
+    }
+
+    @Test
+    fun aReplyUnderABlockedPeersNotificationSendsNothingAndTheNotificationGoes() {
+        // Blocked while the notification sat in the shade: a reply would message the peer the user just blocked.
+        gone += BOB
+        reply(BOB, "still there?")
+        coVerify(exactly = 0) { mesh.sendChat(any(), any(), any(), any(), any(), any()) }
+        verify(exactly = 0) { notifier.onReplied(any(), any(), any(), any(), any()) }
+        verify { notifier.clearConversation(BOB) }
+    }
+
+    @Test
+    fun aReplyUnderALeftGroupsNotificationSendsNothing() {
+        // The row is still there (left = true), so the send path alone would post — and rejoin the group.
+        gone += GROUP_ID
+        reply(GROUP_ID, "back again")
+        coVerify(exactly = 0) { mesh.sendChat(any(), any(), any(), any(), any(), any()) }
+        verify { notifier.clearConversation(GROUP_ID) }
     }
 
     @Test

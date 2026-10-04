@@ -74,6 +74,9 @@
     <string name="notif_title_nearby">Nearby</string>
     <string name="notif_title_meshtastic">Meshtastic</string>
     <string name="notif_self_name">You</string>
+    <!-- A chat a shortcut or a notification opens after it was deleted, blocked or left: the toast, and the message
+         a disabled home-screen shortcut shows when tapped (ADR 2026-10.jbsa) -->
+    <string name="chat_gone">That chat is no longer on this phone</string>
 
     <!-- Notification quick actions + group summary (Signal-style) -->
     <string name="notif_action_reply">Reply</string>

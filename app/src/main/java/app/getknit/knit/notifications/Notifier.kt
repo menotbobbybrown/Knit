@@ -178,10 +178,23 @@ interface Notifier {
 
     /**
      * [clearConversation], and the thread's conversation shortcut goes too — the thread itself is gone (a
-     * removed contact's DM, ADR 2026-09.adgd), so the launcher and the share sheet must stop offering it. A
-     * shortcut the user pinned to the home screen stays; that one was theirs to place.
+     * removed contact's DM, ADR 2026-09.adgd), so the launcher's long-press menu must stop offering it. A
+     * shortcut the user pinned to the home screen cannot be taken away; it is disabled (ADR 2026-10.jbsa).
+     * Every other removal reaches the shortcuts through `ConversationShortcutSync`'s pass instead.
      */
     fun forgetConversation(conversationId: String)
+
+    /**
+     * A shortcut pass's verdict on the shade (ADR 2026-10.jbsa): every message notification of a conversation not in
+     * [offered] is cleared, and a [refreshed] conversation's next re-render draws its current face. A notification
+     * posted after the pass read its inputs ([since], a `ConversationShortcuts` stamp) is newer than the verdict and
+     * stays.
+     */
+    fun retainConversations(
+        offered: Set<String>,
+        refreshed: Map<String, NotifConversation>,
+        since: Long,
+    )
 
     /** Drops the accumulated state for the dismissed [tag] only (notification swiped away). */
     fun onDismissed(tag: String)

@@ -33,8 +33,6 @@ import app.getknit.knit.data.group.toGroupInfo
 import app.getknit.knit.data.message.ConversationKind
 import app.getknit.knit.data.message.Conversations
 import app.getknit.knit.data.message.MessageEntity
-import app.getknit.knit.data.message.groupFaceIds
-import app.getknit.knit.data.message.groupTitle
 import app.getknit.knit.data.peer.PeerEntity
 import app.getknit.knit.data.settings.KnitBoardSetup
 import app.getknit.knit.data.settings.SettingsStore
@@ -70,8 +68,6 @@ import app.getknit.knit.moderation.ModelLoadGuard
 import app.getknit.knit.moderation.ModelLoadPolicy
 import app.getknit.knit.moderation.NsfwImageModerator
 import app.getknit.knit.moderation.modelGuardStamp
-import app.getknit.knit.notifications.NotifConversation
-import app.getknit.knit.notifications.NotifFace
 import app.getknit.knit.notifications.NotifMessage
 import app.getknit.knit.notifications.Notifier
 import app.getknit.knit.review.ReviewPromptPolicy
@@ -251,6 +247,7 @@ class DebugBridgeReceiver :
     private val digest: StoreDigest by inject()
     private val reviewPrompter: ReviewPrompter by inject()
     private val modelGuard: ModelLoadGuard by inject()
+    private val conversationFaces: app.getknit.knit.notifications.ConversationFaces by inject()
     private val textModel: MlTextModerator by inject()
     private val imageModel: NsfwImageModerator by inject()
     private val exits: ProcessExitReasons by inject()
@@ -1089,9 +1086,10 @@ class DebugBridgeReceiver :
 
     /**
      * Posts one incoming-message notification for a seeded conversation, the seam for checking the shade's
-     * avatar on the radio-less build — the twin of what [app.getknit.knit.mesh.InboundPipeline.resolveConversation]
-     * hands the notifier: a DM's peer name and avatar, a group's title and photo, and for a photo-less group the
-     * `groupFaceIds` pick resolved to bytes, so `NotificationAvatars.clusterAvatar` draws what the list does.
+     * avatar on the radio-less build — through the resolver InboundPipeline hands the notifier from
+     * ([app.getknit.knit.notifications.ConversationFaces]): a DM's peer name and avatar, a group's title and photo,
+     * and for a photo-less group the `groupFaceIds` pick resolved to bytes, so `NotificationAvatars.clusterAvatar`
+     * draws what the list does.
      * `--es conv <id>` (required), `--es from <peerNodeId>` (default the first other member / the DM peer),
      * `--es text <body>`. The app must hold `POST_NOTIFICATIONS` or the post silently no-ops.
      */
@@ -1106,33 +1104,7 @@ class DebugBridgeReceiver :
         val fromName = labels.labelFor(from).text
         val fromAvatar = peers.find(from)?.avatarHash?.let { blobs.bytes(it) }
         val body = intent.getStringExtra(EXTRA_TEXT) ?: "Shade check"
-        val conversation =
-            when (kind) {
-                ConversationKind.GROUP -> {
-                    val title =
-                        group?.let {
-                            groupTitle(it.name, memberIds, me, fallback = "") { id -> labels.labelFor(id).text }.ifBlank { null }
-                        }
-                    val photo = group?.photoShownHash?.let { blobs.bytes(it) }
-                    val faces =
-                        if (photo != null) {
-                            emptyList()
-                        } else {
-                            groupFaceIds(memberIds, me).map { id ->
-                                NotifFace(id, labels.labelFor(id).text, peers.find(id)?.avatarHash?.let { blobs.bytes(it) })
-                            }
-                        }
-                    NotifConversation(conv, title, photo, kind, faces)
-                }
-
-                ConversationKind.DM -> {
-                    NotifConversation(conv, fromName, fromAvatar, kind)
-                }
-
-                else -> {
-                    NotifConversation(conv, null, null, kind)
-                }
-            }
+        val conversation = conversationFaces.resolve(conv, me, labels)
         val incoming = NotifMessage(from, fromName, body, System.currentTimeMillis(), conv, fromAvatar)
         notifier.createChannel()
         notifier.notify(incoming, conversation, me, settings.displayName.first(), settings.ownAvatarHash.first()?.let { blobs.bytes(it) })

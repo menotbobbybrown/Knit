@@ -1715,6 +1715,13 @@ class ChatViewModel(
             try {
                 // Normalize a self-quote's snapshotted author before it goes on the wire (see the helper).
                 val outgoingReply = normalizeSelfAuthor(replyTo)
+                // A group thread whose row is gone — deleted from the list, opened by a stale route — is never sent
+                // as a DM: `route` would read the missing row as a peer thread and file the text under the group id
+                // as a pending-key DM to a node that does not exist (ADR 2026-10.jbsa).
+                if (Conversations.kindFor(conversationId) == ConversationKind.GROUP && groups.find(conversationId) == null) {
+                    _events.tryEmit(R.string.chat_gone)
+                    return@launch
+                }
                 val sent = route(body, attachmentForSend(body), mentions, outgoingReply)
                 // MeshManager applies block-on-send. Clear the input/attachment only once a message is
                 // accepted; a blocked message keeps the draft and surfaces a toast so the user can edit.

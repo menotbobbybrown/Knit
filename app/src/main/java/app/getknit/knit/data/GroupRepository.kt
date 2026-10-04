@@ -8,6 +8,7 @@ import app.getknit.knit.data.message.StatusNotices
 import app.getknit.knit.mesh.crypto.ratchet.GroupRatchetStore
 import app.getknit.knit.mesh.spool.GroupRootStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 
 /** Single source of truth for group chats (and, transactionally, their group-ratchet state hooks). */
@@ -24,6 +25,9 @@ class GroupRepository(
     fun observeGroups(): Flow<List<GroupEntity>> = dao.observeAll()
 
     fun observeGroup(groupId: String): Flow<GroupEntity?> = dao.observeById(groupId)
+
+    /** [ids]' rows alone, as they change; an empty set is answered without a query (ADR 2026-10.jbsa). */
+    fun observeGroups(ids: Set<String>): Flow<List<GroupEntity>> = if (ids.isEmpty()) flowOf(emptyList()) else dao.observeByIds(ids)
 
     suspend fun find(groupId: String): GroupEntity? = dao.findById(groupId)
 

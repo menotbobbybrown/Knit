@@ -5,8 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import androidx.core.app.NotificationManagerCompat
-import androidx.core.content.pm.ShortcutManagerCompat
 import app.getknit.knit.mesh.MeshService
+import app.getknit.knit.notifications.ConversationShortcuts
 
 /**
  * "Sign out here" (work item #80, ADR 2026-09.ypcc): this phone gives up the identity it shares with another
@@ -36,14 +36,7 @@ object SignOut {
         val app = context.applicationContext
         app.stopService(Intent(app, MeshService::class.java))
         NotificationManagerCompat.from(app).cancelAll()
-        runCatching {
-            val flags =
-                ShortcutManagerCompat.FLAG_MATCH_DYNAMIC or ShortcutManagerCompat.FLAG_MATCH_CACHED or
-                    ShortcutManagerCompat.FLAG_MATCH_PINNED
-            val ids = ShortcutManagerCompat.getShortcuts(app, flags).map { it.id }
-            ShortcutManagerCompat.removeAllDynamicShortcuts(app)
-            if (ids.isNotEmpty()) ShortcutManagerCompat.removeLongLivedShortcuts(app, ids)
-        }
+        ConversationShortcuts.wipeAll(app)
         Log.i(TAG, "signing out: clearing this phone's data")
         val cleared = app.getSystemService(ActivityManager::class.java).clearApplicationUserData()
         if (!cleared) Log.w(TAG, "the platform refused to clear the app's data")

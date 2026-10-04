@@ -246,6 +246,12 @@ internal class NotificationAvatars(
     /** Whether `KnitTheme` is drawing the wallpaper palette: the Material You switch, on a release that has one. */
     private fun onWallpaperPalette(): Boolean = themePrefs.dynamicColor.value && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
+    /**
+     * Which palette the generated avatars are painted from now, as a word: part of a shortcut's fingerprint, so a
+     * Material You switch repaints the photo-less shortcuts too (ConversationShortcuts).
+     */
+    fun paletteKey(): String = if (onWallpaperPalette()) "wallpaper" else "static"
+
     private companion object {
         // Generated letter-avatar geometry/palette (source avatars are 256²; this matches closely enough).
         private const val AVATAR_PX = 256
