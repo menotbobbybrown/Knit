@@ -84,3 +84,15 @@ and only a suspending phone shows it. Use `elapsedWait`. The reverse holds for a
 time is a battery change, and wants a battery night. And a new rule that gates a dial on the clock (a dwell,
 a window, a hold) needs a wake when it comes due, as `msUntilDue` and `LonelyDialPolicy.msUntilDue` are: on a
 screen-off phone the next sighting is not that wake.
+
+## Amendment (2026-10-04): every wait in the plane says which clock it means
+
+The trap above was a rule nobody could see at the call site, so it is now one CI checks. Every `delay`,
+`withTimeout*` or `Thread.sleep` under `mesh/bluetooth/` carries a `// stretches: <why that is fine>` comment on the
+line above it, or is `elapsedWait`; `BluetoothWaitClockTest` reads the sources and names each unmarked wait. The test
+checks that a decision was written down, not that it is right: judging the reason is the `bluetooth-reviewer`
+persona's (`.agents/personas/bluetooth-reviewer.md`), whose first review of the 23 marked waits found one
+that is not fine — the GATT payload reader's 12 s give-up holds `BleConnectArbiter`, so the scan and every dial wait
+on it (kwq2), and it is marked as owing `elapsedWait` — and two whose reasons stay open: the re-assert loop's no-link
+retry (the net is this ADR's call; the 2.5 s settle and the refusal retry share its wait) and the Coded step-up hold,
+which spans a sleep on two reads.

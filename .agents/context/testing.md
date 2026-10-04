@@ -382,8 +382,9 @@ hop (fixed in `MeshRouter.countOverheard`, pinned by `MeshRouterTest`).
   it), and a failure names its seed in stderr, a suppressed cause and `MeshLab.report`. The one `mesh/` seam is
   `MeshManager(sessionDispatcher = …)`, `Dispatchers.Default` in production. Run it on every lab test you
   write or touch; the `mesh-lab-reviewer` agent (`.agents/personas/`) runs it as part of its review, and a
-  Claude Code Stop hook asks for that review whenever the lab's uncommitted diff moves more than 40 lines past
-  what the last review stamped (`--stamp`, the reviewer's last step) — so applying its findings asks nothing.
+  Claude Code Stop hook (`.claude/hooks/review-gate.sh`) asks for that review whenever the lab's uncommitted
+  diff moves more than 40 lines past what the last review stamped, touches a file it did not see, or sits on a
+  newer commit (`--stamp`, the reviewer's last step) — so applying its findings asks nothing.
 - **What the first chaos sweep taught** (2026-09-24, nine failures, triage in `.agents/memory/roadmap.md`):
   a stack **sends before it custodies** (`originateWire`), so a frame sent into a link that is going down is
   re-offered only by the 60 s timer once the relaunch's digest exchange has run without it — `restart()` and

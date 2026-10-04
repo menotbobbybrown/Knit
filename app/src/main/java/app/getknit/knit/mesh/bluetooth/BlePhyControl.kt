@@ -109,6 +109,7 @@ internal class BlePhyControl(
                 return
             }
             gatt = g
+            // stretches: give-up on a GATT attach over the link's own ACL; a sleep only delays closing the client.
             if (withTimeoutOrNull(ATTACH_TIMEOUT_MS) { attachedSignal.await() } != true) {
                 Log.i(TAG, "bt phy $nodeId: attach failed")
                 return
@@ -117,8 +118,10 @@ internal class BlePhyControl(
             runCatching { g.readPhy() }
             while (currentCoroutineContext().isActive && !disconnected) {
                 if (drives) act(g, stepper.decide(mode(), now()))
+                // stretches: the RSSI cadence (yvn6, dark): step-down counts reads, but a step-up hold spans a sleep on two reads (open).
                 withTimeoutOrNull(stepper.nextReadMs()) { pokes.receive() }
                 if (runCatching { g.readRemoteRssi() }.getOrNull() == true) {
+                    // stretches: give-up on one RSSI read.
                     withTimeoutOrNull(RSSI_TIMEOUT_MS) { rssiReads.receive() }?.let { onRssi(it) }
                 }
             }

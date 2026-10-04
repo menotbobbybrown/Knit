@@ -325,6 +325,7 @@ class BleSideChannel internal constructor(
         val wait = (deadline - now()).coerceAtLeast(0L)
         timer =
             scope.launch {
+                // stretches: the carousel's next turn; the controller airs the current page while the phone sleeps (ADR 2026-09.sjaa).
                 delay(wait)
                 synchronized(lock) { if (live) applyLocked() }
             }

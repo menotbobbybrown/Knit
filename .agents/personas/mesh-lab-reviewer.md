@@ -4,7 +4,7 @@ description: >-
   Adversarial race/timing reviewer for Knit's mesh-in-a-box scenarios. MUST be used whenever a file under
   app/src/test/java/app/getknit/knit/mesh/lab/ is created or modified (a *LabTest scenario, MeshLab,
   LabTransport, LabPages, LabClock), before the change is reported done or committed; the Stop hook
-  `.claude/hooks/mesh-lab-review-stop.sh` enforces it. Reads the diff step by step for the lab's known flake
+  `.claude/hooks/review-gate.sh` enforces it. Reads the diff step by step for the lab's known flake
   shapes (state read as event, stale first poll, late subscriber, un-pinned ordering, release/hold gap, bare
   delay as sync) and stress-runs the changed classes under seeded chaos (scripts/lab-chaos.sh). Reports
   findings and stamps what it reviewed; never edits the tree.
@@ -123,7 +123,7 @@ any failing seeds. No preamble, no summary of what the test does, no praise.
 
 ## Last step: stamp the review
 
-Run `bash .claude/hooks/mesh-lab-review-stop.sh --stamp` once your report is written, whatever the verdict. It
+Run `bash .claude/hooks/review-gate.sh --stamp mesh-lab-reviewer` once your report is written, whatever the verdict. It
 records the lab diff you reviewed (in the git dir, not the tree), so the Stop hook lets through the few-line
 edits that apply your findings and asks for a fresh review only when the diff moves further than that. It is
 the one write you make.

@@ -522,6 +522,12 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   `mesh-lab-reviewer` persona in `.agents/personas/mesh-lab-reviewer.md` before calling the change done — every
   lab flake has been a scenario assuming an order the mesh does not promise. A Stop hook enforces the review.
   Chaos mode is the "Chaos mode" bullet in `.agents/context/testing.md`.
+- **When creating or modifying anything under `mesh/bluetooth/` (its `meshtastic/` and `wear/` included),
+  `mesh/link/FramedLink.kt`, `mesh/power/ElapsedWait.kt` or `mesh/power/PowerState.kt` (`PowerPolicy`):** ADOPT (Claude Code:
+  spawn) the `bluetooth-reviewer` persona in `.agents/personas/bluetooth-reviewer.md` before calling the change
+  done — every Bluetooth fix so far was code that passed its JVM tests and broke on a phone. A Stop hook enforces
+  the review. A `delay` or `withTimeout*` under `mesh/bluetooth/` either goes through `elapsedWait` or carries a
+  `// stretches: <why>` line above it (`BluetoothWaitClockTest`, ADR 2026-10.pj9w's amendment).
 - **When adding, renaming or removing a `@Preview`, or touching `app/src/screenshotTest/`, a reference PNG under
   `app/src/screenshotTestDebug/reference/`, or the `composeScreenshot` plugin:** READ the "Compose preview
   screenshot tests" section of `.agents/context/testing.md` and ADR 2026-10.gtmm. Every public `@Preview` in main
@@ -553,6 +559,10 @@ over cleverness. Start with `.agents/context/architecture.md` for the subsystem 
   router / `.agents/` layout). Skills are vendored in
   the repo (real files under `.agents/skills/`, surfaced to Claude Code via `.claude/skills/` symlinks),
   so cloners get them without any global install.
+- SPAWN a reviewer persona from `.agents/personas/` when its routing bullet above says so; each hunts one class of
+  defect from a catalogue of the ones this repo already shipped and fixed, and never edits. A new reviewer is a
+  persona, its symlink in `.claude/agents/`, a line in `.claude/hooks/review-gate.conf` (the paths its Stop hook
+  gate watches) and a routing bullet here.
 - ADD a durable decision with `python3 scripts/adr.py new "<title>" --topics a,b`, write the body it
   scaffolds, then `python3 scripts/adr.py index`. Never hand-edit `.agents/memory/decisions.md` (generated)
   and never pick an ADR number: ids are minted `YYYY-MM.suffix` so parallel worktrees can't collide, while

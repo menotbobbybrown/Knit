@@ -102,6 +102,7 @@ internal class BleDoorbell(
                         pokes.receive()
                         true
                     } else {
+                        // stretches: the trailing ring (≤ 5 s; a ring buys ~9 s, dqvb) and the 2 s BALANCED settle.
                         withTimeoutOrNull((due - now()).coerceAtLeast(0L)) { pokes.receive() } != null
                     }
                 val t = now()
@@ -249,8 +250,10 @@ internal class BleDoorbell(
             // API-37 `connectGatt(BluetoothGattConnectionSettings, Executor, callback)`, eight releases above minSdk 29.
             gatt = runCatching { device.connectGatt(context, false, this, BluetoothDevice.TRANSPORT_LE) }.getOrNull()
                 ?: return "connectGatt"
+            // stretches: give-up on a GATT attach over the link's own ACL; a sleep only delays closing the client.
             if (withTimeoutOrNull(ATTACH_TIMEOUT_MS) { attached.await() } != true) return "attach"
             if (runCatching { gatt?.discoverServices() }.getOrNull() != true) return "discover"
+            // stretches: give-up on service discovery, as above.
             if (withTimeoutOrNull(DISCOVER_TIMEOUT_MS) { discovered.await() } != true) return "discover"
             return null
         }

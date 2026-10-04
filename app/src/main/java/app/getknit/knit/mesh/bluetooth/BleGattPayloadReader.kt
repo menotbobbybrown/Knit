@@ -45,6 +45,7 @@ internal class BleGattPayloadReader(
         arbiter.begin(ARBITER_TAG)
         val client = Client(device)
         return try {
+            // stretches: NOT fine: the read holds the arbiter, so the scan and every dial wait on it (kwq2). Owed: elapsedWait.
             withTimeoutOrNull(timeoutMs) { client.read() } ?: Result(GattPayloads.Outcome.Failed, "timeout@${client.phase}")
         } finally {
             client.close()

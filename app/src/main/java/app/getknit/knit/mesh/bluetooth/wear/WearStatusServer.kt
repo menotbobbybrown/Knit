@@ -141,6 +141,7 @@ internal class WearStatusServer(
                     setAdvert(until != null)
                     // A pause that lapses on the clock may not move any input before the mesh is back up.
                     if (until != null) {
+                        // stretches: a late end keeps this advert up only while the mesh is down; a resume cancels it.
                         delay(until - clock())
                         setAdvert(false)
                     }
@@ -246,6 +247,7 @@ internal class WearStatusServer(
     private fun serve(client: BluetoothSocket) {
         val linger =
             scope.launch {
+                // stretches: a 3 s bound on a watch that never closes; a late close holds one socket longer.
                 delay(LINGER_MS)
                 runCatching { client.close() }
             }

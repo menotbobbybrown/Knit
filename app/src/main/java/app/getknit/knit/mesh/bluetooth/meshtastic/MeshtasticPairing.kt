@@ -94,6 +94,7 @@ internal class MeshtasticBonder(
         )
         try {
             if (!device.createBond()) return BondResult.Failed(reason = -2)
+            // stretches: dead code: MeshtasticBonder has no caller (and its NOT_EXPORTED bond receiver would never fire, 9utz).
             return kotlinx.coroutines.withTimeoutOrNull(BOND_TIMEOUT_MS) { settled.await() } ?: BondResult.Timeout
         } finally {
             runCatching { appContext.unregisterReceiver(receiver) }

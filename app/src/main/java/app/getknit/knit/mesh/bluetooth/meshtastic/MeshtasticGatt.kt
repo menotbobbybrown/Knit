@@ -362,6 +362,7 @@ internal class MeshtasticGatt(
             timeoutMs: Long,
             adapterOn: StateFlow<Boolean>,
         ): ConnectWait =
+            // stretches: the controller dials through sleep; a late give-up delays hp88's hourly direct net and holds the arbiter.
             withTimeoutOrNull(timeoutMs) {
                 coroutineScope {
                     val off =
@@ -391,6 +392,7 @@ internal class MeshtasticGatt(
         suspend fun negotiateMtu(): Int {
             var last = -1
             repeat(MTU_ATTEMPTS) { attempt ->
+                // stretches: a sub-second settle before the MTU exchange; a sleep only slows the setup.
                 delay(if (attempt == 0) SETTLE_MS else MTU_RETRY_MS)
                 last = requestMtuOnce(REQUEST_MTU, MTU_TIMEOUT_MS)
                 if (last >= MIN_MTU) return last
@@ -406,6 +408,7 @@ internal class MeshtasticGatt(
             val d = CompletableDeferred<Int>()
             mtuResult = d
             if (gatt?.requestMtu(mtu) != true) return -1
+            // stretches: give-up on a setup op; a lost callback holds the arbiter, so the mesh scan, up to ~43 s.
             return withTimeoutOrNull(timeoutMs) { d.await() } ?: -1
         }
 
@@ -413,6 +416,7 @@ internal class MeshtasticGatt(
             val d = CompletableDeferred<Boolean>()
             discoverResult = d
             if (gatt?.discoverServices() != true) return false
+            // stretches: give-up on a setup op; a lost callback holds the arbiter, so the mesh scan, up to ~43 s.
             return withTimeoutOrNull(timeoutMs) { d.await() } ?: false
         }
 
@@ -487,6 +491,7 @@ internal class MeshtasticGatt(
                     pending = null
                     return@withLock GattResult.Failed(-1)
                 }
+                // stretches: give-up on one GATT op after the dial opened, outside the arbiter.
                 val result = withTimeoutOrNull(timeoutMs) { d.await() } ?: GattResult.Timeout
                 pending = null
                 result

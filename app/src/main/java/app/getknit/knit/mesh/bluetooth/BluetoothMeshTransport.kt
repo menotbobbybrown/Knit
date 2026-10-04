@@ -435,6 +435,7 @@ class BluetoothMeshTransport(
             cueJob =
                 scope.launch {
                     storeDigest.version.drop(1).collectLatest {
+                        // stretches: a 1.5 s debounce; a late re-advertise only delays a pull cue.
                         delay(CUE_READVERTISE_DEBOUNCE_MS)
                         readvertise()
                     }
@@ -684,6 +685,7 @@ class BluetoothMeshTransport(
         while (scope.isActive) {
             if (adapter?.isEnabled != true) {
                 // Nothing to enable; bringUp starts the set afresh when the adapter comes back.
+                // stretches: a 60 s net while the adapter is off; STATE_ON's bringUp raises the set, but wake() never pokes this loop.
                 withTimeoutOrNull(ADAPTER_OFF_WAIT_MS) { advertWake.receive() }
                 continue
             }
@@ -704,6 +706,7 @@ class BluetoothMeshTransport(
                 codedKeeper.reasserted(now)
             }
             val wait = minOf(advertKeeper.waitMs(elapsed(), linked), codedKeeper.waitMs(elapsed(), linked))
+            // stretches: the re-assert turns (9utz): settle, refusal retry, net. pj9w kept the net monotonic; the no-link retry is open.
             withTimeoutOrNull(wait) { advertWake.receive() }
         }
     }
@@ -857,6 +860,7 @@ class BluetoothMeshTransport(
         paceJob?.cancel()
         paceJob =
             scope.launch {
+                // stretches: the fast Coded advert's 2.5 s start (≈ CHECK_MS on either clock) and 3 min end (battery only).
                 delay(delayMs)
                 applyCodedPace()
             }
@@ -1038,6 +1042,7 @@ class BluetoothMeshTransport(
             if (PowerPolicy.hunting(power, links.size, aloneFor)) {
                 elapsedWait.receiveWithin(scanWake, idle)
             } else {
+                // stretches: a power budget: the settled, linked and relaxed gaps (pj9w).
                 withTimeoutOrNull(idle) { scanWake.receive() }
             }
         }
@@ -1950,6 +1955,7 @@ class BluetoothMeshTransport(
                 sideDecision = decision
                 Log.d(TAG, "ble-side $decision applied=${side.scanTier}")
             }
+            // stretches: the side channel's tick (pj9w).
             withTimeoutOrNull(SIDE_TICK_MS) { sideWake.receive() }
         }
     }
@@ -1972,6 +1978,7 @@ class BluetoothMeshTransport(
 
     private suspend fun diagLoop() {
         while (scope.isActive) {
+            // stretches: the `bt state` line, whose stretch is the measure of how much a phone sleeps (pj9w).
             delay(DIAG_INTERVAL_MS)
             audioMonitor.refresh() // re-evaluate audio vs live AudioManager state (the playing edge can be missed)
             // R8 strips the Log.d in release, not the string this builds under the lock: debug only.
